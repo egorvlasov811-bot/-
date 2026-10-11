@@ -108,6 +108,13 @@
   #surprise .emojis { font-size: 30px; margin-top: 18px; letter-spacing: 6px;
     animation: slideUp 0.6s ease 0.55s both; }
   @keyframes slideUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+  #surprise .after-link {
+    margin-top: 26px; background: #fff; color: #7b2ff7; border: 0;
+    border-radius: 999px; padding: 14px 30px; font-size: 17px; font-weight: 800;
+    cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,0.22);
+    animation: slideUp 0.6s ease 0.7s both; transition: transform 0.12s ease;
+  }
+  #surprise .after-link:active { transform: scale(0.95); }
   canvas#confetti { position: fixed; inset: 0; pointer-events: none; z-index: 10000; display: none; }
   canvas#confetti.show { display: block; }
 
@@ -152,6 +159,14 @@
     titleTop: "С Днём рождения,",
     message: "Это был не бот с игрой 😏 Лови поздравление! Пусть всё задуманное сбывается, здоровья, кучу денег и самых крутых приключений. Обнимаю! 🎉",
     emojis: "🎂 🎈 🎁 🥳 🎊",
+
+    // --- Куда вести ПОСЛЕ поздравления ---
+    // Ссылка, которая откроется после сюрприза (видео, плейлист, сайт, t.me/...).
+    // Если оставить "" — кнопки не будет.
+    afterLink: "",
+    afterLinkText: "Продолжить →",   // текст кнопки
+    afterLinkAuto: false,            // true = открыть автоматически (без нажатия)
+    afterLinkDelayMs: 4000,          // через сколько мс открыть при afterLinkAuto: true
   };
 </script>
 <!-- =============================================================== -->
@@ -189,6 +204,7 @@
   <h2 id="s-name">дорогой друг!</h2>
   <p id="s-message"></p>
   <div class="emojis" id="s-emojis"></div>
+  <button id="s-link" class="after-link" style="display:none;"></button>
 </div>
 <canvas id="confetti"></canvas>
 
@@ -409,6 +425,30 @@ function triggerSurprise() {
   haptic("heavy");
   try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred("success"); } catch (e) {}
   startConfetti();
+  setupAfterLink();
+}
+
+// Открытие ссылки: t.me/... через Telegram, остальное — через openLink/окно.
+function openUrl(url) {
+  try {
+    if (/(?:^https?:)?\/\/t\.me\//i.test(url) || url.startsWith("tg://")) {
+      if (tg && tg.openTelegramLink) { tg.openTelegramLink(url); return; }
+    }
+    if (tg && tg.openLink) { tg.openLink(url, { try_instant_view: false }); return; }
+  } catch (e) {}
+  window.open(url, "_blank");
+}
+
+function setupAfterLink() {
+  const url = (CONFIG.afterLink || "").trim();
+  if (!url) return;
+  const btn = document.getElementById("s-link");
+  btn.textContent = CONFIG.afterLinkText || "Продолжить →";
+  btn.style.display = "";
+  btn.addEventListener("click", () => { haptic("medium"); openUrl(url); });
+  if (CONFIG.afterLinkAuto) {
+    setTimeout(() => openUrl(url), Math.max(0, CONFIG.afterLinkDelayMs || 0));
+  }
 }
 
 function startConfetti() {
