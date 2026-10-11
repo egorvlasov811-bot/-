@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>2048 — Puzzle</title>
+<meta name="description" content="Классическая головоломка 2048. Складывай плитки и доберись до 2048!" />
+<!-- Telegram Mini App SDK -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  /* =======================================================================
+     ВСЕ НАСТРОЙКИ РОЗЫГРЫША — ЗДЕСЬ, В CONFIG (см. тег <script> ниже).
+     Тут только стили.
+     ======================================================================= */
+  :root {
+    --bg: #faf8ef;
+    --text: #776e65;
+    --board: #bbada0;
+    --cell: #cdc1b4;
+    --btn: #8f7a66;
+    --tile-text-light: #f9f6f2;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Clear Sans", "Helvetica Neue", Arial, sans-serif;
+    overflow: hidden;
+    user-select: none; -webkit-user-select: none;
+    overscroll-behavior: none;
+  }
+  #app {
+    max-width: 480px; margin: 0 auto;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom)) 16px;
+    display: flex; flex-direction: column; min-height: 100%;
+  }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .logo { font-size: 40px; font-weight: 800; color: var(--text); letter-spacing: -1px; }
+  .scores { display: flex; gap: 8px; }
+  .score-box {
+    background: var(--board); color: #fff; border-radius: 6px;
+    padding: 6px 14px; text-align: center; min-width: 64px;
+  }
+  .score-box .label { font-size: 11px; text-transform: uppercase; color: #eee4da; font-weight: 700; letter-spacing: 1px; }
+  .score-box .val { font-size: 20px; font-weight: 800; }
+  .subtitle { font-size: 14px; margin: 2px 0 14px; line-height: 1.4; }
+  .subtitle b { color: var(--btn); }
+  .new-game {
+    background: var(--btn); color: #fff; border: 0; border-radius: 6px;
+    padding: 10px 16px; font-size: 14px; font-weight: 700; cursor: pointer; margin-left: auto;
+  }
+  .board-wrap { position: relative; width: 100%; }
+  #board {
+    position: relative; background: var(--board); border-radius: 8px;
+    width: 100%; aspect-ratio: 1 / 1; padding: var(--gap); touch-action: none;
+  }
+  .grid-bg { position: absolute; inset: var(--gap); display: grid; gap: var(--gap);
+    grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr); }
+  .grid-cell { background: var(--cell); border-radius: 6px; }
+  .tiles { position: absolute; inset: var(--gap); }
+  .tile {
+    position: absolute; display: flex; align-items: center; justify-content: center;
+    border-radius: 6px; font-weight: 800; transition: transform 0.1s ease-in-out;
+    will-change: transform;
+  }
+  .tile-inner { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; border-radius: 6px; }
+  .tile-new .tile-inner { animation: pop 0.18s ease; }
+  .tile-merged .tile-inner { animation: pop 0.18s ease; }
+  @keyframes pop { 0% { transform: scale(0); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
+
+  .t2    { background:#eee4da; color:#776e65; }
+  .t4    { background:#ede0c8; color:#776e65; }
+  .t8    { background:#f2b179; color:var(--tile-text-light); }
+  .t16   { background:#f59563; color:var(--tile-text-light); }
+  .t32   { background:#f67c5f; color:var(--tile-text-light); }
+  .t64   { background:#f65e3b; color:var(--tile-text-light); }
+  .t128  { background:#edcf72; color:var(--tile-text-light); }
+  .t256  { background:#edcc61; color:var(--tile-text-light); }
+  .t512  { background:#edc850; color:var(--tile-text-light); }
+  .t1024 { background:#edc53f; color:var(--tile-text-light); }
+  .t2048 { background:#edc22e; color:var(--tile-text-light); }
+
+  footer { margin-top: 14px; font-size: 12px; color: #a89b8d; text-align: center; }
+
+  /* ---------- ЭКРАН СЮРПРИЗА ---------- */
+  #surprise {
+    position: fixed; inset: 0; z-index: 9999;
+    background: linear-gradient(160deg, #ff6b9d 0%, #c44bc9 45%, #7b2ff7 100%);
+    color: #fff; display: none; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    padding: 24px; overflow: hidden;
+  }
+  #surprise.show { display: flex; animation: fadeIn 0.5s ease; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  #surprise .cake { font-size: 72px; animation: bob 2s ease-in-out infinite; }
+  @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+  #surprise h1 {
+    font-size: clamp(28px, 8vw, 46px); margin: 16px 0 6px; line-height: 1.15;
+    text-shadow: 0 2px 16px rgba(0,0,0,0.25); animation: slideUp 0.6s ease 0.1s both;
+  }
+  #surprise h2 {
+    font-size: clamp(20px, 6vw, 32px); margin: 0 0 18px; font-weight: 800;
+    animation: slideUp 0.6s ease 0.25s both;
+  }
+  #surprise p { font-size: clamp(15px, 4.2vw, 19px); max-width: 420px; line-height: 1.5;
+    opacity: 0.97; animation: slideUp 0.6s ease 0.4s both; }
+  #surprise .emojis { font-size: 30px; margin-top: 18px; letter-spacing: 6px;
+    animation: slideUp 0.6s ease 0.55s both; }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+  canvas#confetti { position: fixed; inset: 0; pointer-events: none; z-index: 10000; display: none; }
+  canvas#confetti.show { display: block; }
+
+  /* короткий «фейковый» лоадер, если включён режим reveal сразу */
+  #loader {
+    position: fixed; inset: 0; z-index: 9998; background: var(--bg);
+    display: none; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+  }
+  #loader.show { display: flex; }
+  #loader .logo { font-size: 48px; }
+  .spinner { width: 42px; height: 42px; border: 5px solid var(--cell);
+    border-top-color: var(--btn); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loader .ltext { font-size: 14px; color: #a89b8d; }
+</style>
+</head>
+<body>
+
+<!-- ======================= КОНФИГ РОЗЫГРЫША ======================= -->
+<script>
+  const CONFIG = {
+    // Имя друга в поздравлении. Поставь любое, напр. "Чингиз".
+    // Если оставить пустым "", будет: "дорогой друг".
+    friendName: "",
+
+    // Когда показывать поздравление:
+    //   "moves" — после нескольких ходов (друг успеет втянуться в игру — максимально незаметно)
+    //   "instant" — почти сразу после открытия (короткий лоадер "загрузка игры", потом сюрприз)
+    //   "score"  — когда счёт достигнет значения revealScore
+    revealMode: "moves",
+
+    // Для revealMode: "moves" — сколько ходов сделать до сюрприза
+    revealAfterMoves: 6,
+
+    // Для revealMode: "score" — при каком счёте показать сюрприз
+    revealScore: 100,
+
+    // Для revealMode: "instant" — сколько мс крутить "загрузку" перед сюрпризом
+    instantDelayMs: 2200,
+
+    // Тексты поздравления (меняй как хочешь)
+    titleTop: "С Днём рождения,",
+    message: "Это был не бот с игрой 😏 Лови поздравление! Пусть всё задуманное сбывается, здоровья, кучу денег и самых крутых приключений. Обнимаю! 🎉",
+    emojis: "🎂 🎈 🎁 🥳 🎊",
+  };
+</script>
+<!-- =============================================================== -->
+
+<div id="app">
+  <header>
+    <div class="logo">2048</div>
+    <div class="scores">
+      <div class="score-box"><div class="label">Счёт</div><div class="val" id="score">0</div></div>
+      <div class="score-box"><div class="label">Рекорд</div><div class="val" id="best">0</div></div>
+    </div>
+  </header>
+  <div class="subtitle">Соединяй плитки и собери <b>2048</b>! Свайпай или жми стрелки.</div>
+  <button class="new-game" id="newGame" style="margin-bottom:12px;">Новая игра</button>
+  <div class="board-wrap">
+    <div id="board">
+      <div class="grid-bg" id="gridBg"></div>
+      <div class="tiles" id="tiles"></div>
+    </div>
+  </div>
+  <footer>Проведи пальцем, чтобы двигать плитки · управление стрелками на клавиатуре</footer>
+</div>
+
+<!-- Лоадер для режима instant -->
+<div id="loader">
+  <div class="logo">2048</div>
+  <div class="spinner"></div>
+  <div class="ltext">Загрузка игры…</div>
+</div>
+
+<!-- Экран-сюрприз -->
+<div id="surprise">
+  <div class="cake">🎂</div>
+  <h1 id="s-title">С Днём рождения,</h1>
+  <h2 id="s-name">дорогой друг!</h2>
+  <p id="s-message"></p>
+  <div class="emojis" id="s-emojis"></div>
+</div>
+<canvas id="confetti"></canvas>
+
+<script>
+/* =========================================================================
+   Telegram WebApp init
+   ========================================================================= */
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+if (tg) {
+  try {
+    tg.ready();
+    tg.expand();
+    tg.setHeaderColor && tg.setHeaderColor("#faf8ef");
+    tg.setBackgroundColor && tg.setBackgroundColor("#faf8ef");
+    tg.disableVerticalSwipes && tg.disableVerticalSwipes();
+  } catch (e) {}
+}
+function haptic(type) {
+  try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(type || "light"); } catch (e) {}
+}
+
+/* =========================================================================
+   Игра 2048
+   ========================================================================= */
+const SIZE = 4;
+let grid, score, best, moveCount, revealed;
+const boardEl = document.getElementById("board");
+const tilesEl = document.getElementById("tiles");
+const gridBgEl = document.getElementById("gridBg");
+const scoreEl = document.getElementById("score");
+const bestEl = document.getElementById("best");
+
+// фоновые ячейки
+for (let i = 0; i < SIZE * SIZE; i++) {
+  const c = document.createElement("div");
+  c.className = "grid-cell";
+  gridBgEl.appendChild(c);
+}
+
+function loadBest() {
+  try { return parseInt(localStorage.getItem("best2048") || "0", 10) || 0; } catch (e) { return 0; }
+}
+function saveBest(v) { try { localStorage.setItem("best2048", String(v)); } catch (e) {} }
+
+function emptyGrid() { return Array.from({ length: SIZE }, () => Array(SIZE).fill(0)); }
+
+function addRandomTile() {
+  const empties = [];
+  for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) if (grid[r][c] === 0) empties.push([r, c]);
+  if (!empties.length) return;
+  const [r, c] = empties[Math.floor(Math.random() * empties.length)];
+  grid[r][c] = Math.random() < 0.9 ? 2 : 4;
+  return [r, c];
+}
+
+function init() {
+  grid = emptyGrid();
+  score = 0;
+  moveCount = 0;
+  revealed = false;
+  best = loadBest();
+  bestEl.textContent = best;
+  addRandomTile();
+  addRandomTile();
+  render(true);
+  if (CONFIG.revealMode === "instant") startInstant();
+}
+
+function tileGeometry() {
+  const inner = boardEl.clientWidth - parseFloat(getComputedStyle(boardEl).paddingLeft) * 2;
+  const gap = inner * 0.03;
+  const cell = (inner - gap * (SIZE - 1)) / SIZE;
+  return { gap, cell };
+}
+
+function fontForValue(v) {
+  if (v < 100) return "clamp(22px, 9vw, 40px)";
+  if (v < 1000) return "clamp(18px, 7.5vw, 34px)";
+  return "clamp(14px, 6vw, 28px)";
+}
+
+function render(firstPaint) {
+  // пересоздаём плитки (простая, надёжная отрисовка)
+  const { gap, cell } = tileGeometry();
+  boardEl.style.setProperty("--gap", (gap) + "px");
+  tilesEl.innerHTML = "";
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const v = grid[r][c];
+      if (!v) continue;
+      const t = document.createElement("div");
+      t.className = "tile t" + (v <= 2048 ? v : 2048);
+      t.style.width = cell + "px";
+      t.style.height = cell + "px";
+      t.style.transform = `translate(${c * (cell + gap)}px, ${r * (cell + gap)}px)`;
+      t.style.fontSize = fontForValue(v);
+      const inner = document.createElement("div");
+      inner.className = "tile-inner t" + (v <= 2048 ? v : 2048);
+      inner.textContent = v;
+      t.appendChild(inner);
+      tilesEl.appendChild(t);
+    }
+  }
+  scoreEl.textContent = score;
+  if (score > best) { best = score; bestEl.textContent = best; saveBest(best); }
+}
+
+// сдвиг одной линии влево; возвращает {line, gained, moved}
+function slide(line) {
+  const arr = line.filter((x) => x !== 0);
+  let gained = 0;
+  for (let i = 0; i < arr.length - 1; i++) {
+    if (arr[i] === arr[i + 1]) {
+      arr[i] *= 2; gained += arr[i]; arr[i + 1] = 0; i++;
+    }
+  }
+  const merged = arr.filter((x) => x !== 0);
+  while (merged.length < SIZE) merged.push(0);
+  return { line: merged, gained };
+}
+
+function rotateCW(g) {
+  const n = emptyGrid();
+  for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) n[c][SIZE - 1 - r] = g[r][c];
+  return n;
+}
+function rotateCCW(g) {
+  const n = emptyGrid();
+  for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) n[SIZE - 1 - c][r] = g[r][c];
+  return n;
+}
+
+function move(dir) {
+  if (revealed) return;
+  let g = grid.map((row) => row.slice());
+  if (dir === "up") { g = rotateCCW(g); }
+  else if (dir === "right") { g = rotateCW(g); g = rotateCW(g); }
+  else if (dir === "down") { g = rotateCW(g); }
+
+  let moved = false, gainedTotal = 0;
+  for (let r = 0; r < SIZE; r++) {
+    const before = g[r].slice();
+    const res = slide(g[r]);
+    g[r] = res.line;
+    gainedTotal += res.gained;
+    if (before.join(",") !== g[r].join(",")) moved = true;
+  }
+
+  // поворачиваем обратно
+  if (dir === "up") g = rotateCW(g);
+  else if (dir === "right") { g = rotateCW(g); g = rotateCW(g); }
+  else if (dir === "down") g = rotateCCW(g);
+
+  if (!moved) return;
+  grid = g;
+  score += gainedTotal;
+  moveCount++;
+  addRandomTile();
+  render();
+  haptic("light");
+  checkReveal();
+}
+
+function checkReveal() {
+  if (revealed) return;
+  if (CONFIG.revealMode === "moves" && moveCount >= CONFIG.revealAfterMoves) triggerSurprise();
+  else if (CONFIG.revealMode === "score" && score >= CONFIG.revealScore) triggerSurprise();
+}
+
+/* =========================================================================
+   Управление: свайпы + клавиатура
+   ========================================================================= */
+let touchStart = null;
+boardEl.addEventListener("touchstart", (e) => {
+  const t = e.touches[0]; touchStart = { x: t.clientX, y: t.clientY };
+}, { passive: true });
+boardEl.addEventListener("touchend", (e) => {
+  if (!touchStart) return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchStart.x, dy = t.clientY - touchStart.y;
+  const adx = Math.abs(dx), ady = Math.abs(dy);
+  if (Math.max(adx, ady) < 24) { touchStart = null; return; }
+  if (adx > ady) move(dx > 0 ? "right" : "left");
+  else move(dy > 0 ? "down" : "up");
+  touchStart = null;
+}, { passive: true });
+
+window.addEventListener("keydown", (e) => {
+  const map = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+  if (map[e.key]) { e.preventDefault(); move(map[e.key]); }
+});
+
+document.getElementById("newGame").addEventListener("click", () => { if (!revealed) init(); });
+window.addEventListener("resize", () => { if (!revealed) render(); });
+
+/* =========================================================================
+   Режим instant: короткий лоадер, затем сюрприз
+   ========================================================================= */
+function startInstant() {
+  const loader = document.getElementById("loader");
+  loader.classList.add("show");
+  setTimeout(() => { loader.classList.remove("show"); triggerSurprise(); }, CONFIG.instantDelayMs);
+}
+
+/* =========================================================================
+   СЮРПРИЗ + КОНФЕТТИ
+   ========================================================================= */
+function triggerSurprise() {
+  if (revealed) return;
+  revealed = true;
+  const name = (CONFIG.friendName || "").trim();
+  document.getElementById("s-title").textContent = CONFIG.titleTop;
+  document.getElementById("s-name").textContent = (name ? name : "дорогой друг") + "!";
+  document.getElementById("s-message").textContent = CONFIG.message;
+  document.getElementById("s-emojis").textContent = CONFIG.emojis;
+  document.getElementById("surprise").classList.add("show");
+  try { tg && tg.setBackgroundColor && tg.setBackgroundColor("#7b2ff7"); } catch (e) {}
+  haptic("heavy");
+  try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred("success"); } catch (e) {}
+  startConfetti();
+}
+
+function startConfetti() {
+  const canvas = document.getElementById("confetti");
+  canvas.classList.add("show");
+  const ctx = canvas.getContext("2d");
+  function resize() { canvas.width = innerWidth; canvas.height = innerHeight; }
+  resize(); window.addEventListener("resize", resize);
+  const colors = ["#ffd700", "#ff6b9d", "#7b2ff7", "#00e0ff", "#4caf50", "#ff9800", "#ffffff"];
+  const parts = [];
+  for (let i = 0; i < 160; i++) {
+    parts.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * -canvas.height,
+      w: 6 + Math.random() * 8, h: 8 + Math.random() * 10,
+      c: colors[(Math.random() * colors.length) | 0],
+      vy: 2 + Math.random() * 4, vx: -2 + Math.random() * 4,
+      rot: Math.random() * Math.PI, vr: -0.2 + Math.random() * 0.4,
+    });
+  }
+  function frame() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const p of parts) {
+      p.y += p.vy; p.x += p.vx; p.rot += p.vr;
+      if (p.y > canvas.height + 20) { p.y = -20; p.x = Math.random() * canvas.width; }
+      ctx.save();
+      ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+      ctx.fillStyle = p.c;
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    }
+    requestAnimationFrame(frame);
+  }
+  frame();
+}
+
+/* старт */
+init();
+</script>
+</body>
+</html>
