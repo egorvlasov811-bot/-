@@ -270,14 +270,14 @@ const SKINS = [
   {id:"classic", emoji:"🙂", body:"#4a90d9", name:"Классик",  price:0},
   {id:"girl",    emoji:"👧", body:"#e84f8c", name:"Подружка", price:0},
   {id:"boy",     emoji:"👦", body:"#2e86de", name:"Пацан",    price:0},
-  {id:"red",     emoji:"🧑‍🦰", body:"#e67e22", name:"Рыжик",   price:40},
-  {id:"cool",    emoji:"😎", body:"#2c3e50", name:"Крутыш",   price:70},
-  {id:"cowboy",  emoji:"🤠", body:"#a0522d", name:"Ковбой",   price:120},
-  {id:"ninja",   emoji:"🥷", body:"#222",    name:"Ниндзя",   price:150},
-  {id:"princess",emoji:"👸", body:"#d63384", name:"Принцесса",price:180},
-  {id:"alien",   emoji:"👽", body:"#2ecc71", name:"Пришелец", price:250},
-  {id:"robot",   emoji:"🤖", body:"#7f8c8d", name:"Робот",    price:300},
-  {id:"vampire", emoji:"🧛", body:"#6c3483", name:"Вампир",   price:350},
+  {id:"red",     emoji:"🧑‍🦰", body:"#e67e22", name:"Рыжик",   price:10},
+  {id:"cool",    emoji:"😎", body:"#2c3e50", name:"Крутыш",   price:15},
+  {id:"cowboy",  emoji:"🤠", body:"#a0522d", name:"Ковбой",   price:20},
+  {id:"ninja",   emoji:"🥷", body:"#222",    name:"Ниндзя",   price:25},
+  {id:"princess",emoji:"👸", body:"#d63384", name:"Принцесса",price:30},
+  {id:"alien",   emoji:"👽", body:"#2ecc71", name:"Пришелец", price:40},
+  {id:"robot",   emoji:"🤖", body:"#7f8c8d", name:"Робот",    price:50},
+  {id:"vampire", emoji:"🧛", body:"#6c3483", name:"Вампир",   price:60},
 ];
 const skinById = id => SKINS.find(s=>s.id===id) || SKINS[0];
 
@@ -292,14 +292,26 @@ const DECOR = [
 const decorById = id => DECOR.find(d=>d.id===id);
 
 const POOLS = [
-  {id:"puddle",  emoji:"💧", name:"Лужа",    w:120, h:92,  price:0},
-  {id:"classic", emoji:"🏊", name:"Классик", w:170, h:120, price:0},
-  {id:"big",     emoji:"🏖️", name:"Большой", w:228, h:150, price:150},
-  {id:"lagoon",  emoji:"🌊", name:"Лагуна",  w:290, h:178, price:400},
+  {id:"puddle",  emoji:"💧", name:"Лужа",    w:120, h:92,  price:0,
+   water:"linear-gradient(180deg,#4fc3e8,#2a93c7)", rim:["#dff1fb","#bfe0f1"], radius:"16px"},
+  {id:"classic", emoji:"🏊", name:"Классик", w:170, h:120, price:0,
+   water:"linear-gradient(180deg,#35a7e0,#1f74c4)", rim:["#cfe7f5","#a7cfe8"], radius:"14px"},
+  {id:"round",   emoji:"⭕", name:"Круглый", w:150, h:150, price:25,
+   water:"linear-gradient(180deg,#43d6c4,#1fa7a0)", rim:["#e2fbf6","#bdeee6"], radius:"50%"},
+  {id:"kids",    emoji:"🛟", name:"Детский", w:140, h:110, price:35,
+   water:"linear-gradient(180deg,#7fe3a6,#39b36f)", rim:["#ffe08a","#ffc93c"], radius:"46px"},
+  {id:"lagoon",  emoji:"🏝️", name:"Лагуна",  w:240, h:150, price:60,
+   water:"linear-gradient(180deg,#36d1c4,#128a97)", rim:["#dff7f2","#a9e7df"], radius:"34px"},
+  {id:"neon",    emoji:"🌌", name:"Неон",    w:200, h:140, price:90,
+   water:"linear-gradient(180deg,#19d3ff,#0a4fd1)", rim:["#0c2233","#071726"], radius:"14px", glow:"rgba(25,211,255,.85)"},
+  {id:"lava",    emoji:"🌋", name:"Лава",    w:180, h:130, price:120,
+   water:"linear-gradient(180deg,#ff7a3c,#c81d4a)", rim:["#3a1200","#210a00"], radius:"14px", glow:"rgba(255,90,40,.75)"},
+  {id:"mega",    emoji:"🌊", name:"Мега",    w:290, h:178, price:160,
+   water:"linear-gradient(180deg,#2db6ef,#155fb0)", rim:["#cdeaf8","#9fd3ef"], radius:"26px"},
 ];
 const poolTypeById = id => POOLS.find(p=>p.id===id) || POOLS[1];
 
-const NEW_SIM_PRICE = 100;
+const NEW_SIM_PRICE = 25;
 const DROWN_MS = 3*60*1000; // 3 минуты
 
 /* =========================================================================
@@ -352,9 +364,10 @@ function placePool(cx,cy){
   el.style.left=x+"px";el.style.top=y+"px";el.style.width=w+"px";el.style.height=h+"px";
   const water=document.createElement("div");water.className="water";el.appendChild(water);
   stage.appendChild(el);
-  pool={x,y,w,h,el,waterEl:water,hasLadder:true,ladderEl:null,noLadderEl:null};
+  pool={x,y,w,h,el,waterEl:water,hasLadder:true,ladderEl:null,noLadderEl:null,type:pt};
   el.style.zIndex=Math.floor(y+h);
   el.addEventListener("click",(e)=>{e.stopPropagation();onPoolTap();});
+  stylePool();
   updateLadder();
   document.getElementById("btnLadder").disabled=false;
   document.getElementById("btnPoolLabel").textContent="Убрать";
@@ -376,16 +389,27 @@ function removePool(){
   document.getElementById("btnPoolLabel").textContent="Бассейн";
   document.getElementById("btnPool").classList.remove("warn");
 }
+function stylePool(){
+  if(!pool||!pool.type)return;
+  const pt=pool.type;
+  pool.el.style.borderRadius=pt.radius;
+  pool.waterEl.style.borderRadius=pt.radius;
+  let bs=`0 6px 16px rgba(0,0,0,.35), inset 0 0 0 5px ${pt.rim[0]}, inset 0 0 0 9px ${pt.rim[1]}`;
+  if(pt.glow)bs+=`, 0 0 22px ${pt.glow}`;
+  pool.el.style.boxShadow=bs;
+}
 function resizePoolTo(pt){
   if(!pool)return;
   const cx=pool.x+pool.w/2, cy=pool.y+pool.h/2;
   const w=pt.w,h=pt.h;
+  pool.type=pt;
   pool.w=w;pool.h=h;
   pool.x=clamp(cx-w/2,14,W-w-14);
   pool.y=clamp(cy-h/2,70,H-h-20);
   pool.el.style.left=pool.x+"px";pool.el.style.top=pool.y+"px";
   pool.el.style.width=w+"px";pool.el.style.height=h+"px";
   pool.el.style.zIndex=Math.floor(pool.y+h);
+  stylePool();
   updateLadder();
 }
 function ladderPoint(){ // точка у лестницы (снаружи, сверху бассейна)
@@ -403,7 +427,7 @@ function updateLadder(){
     }
     pool.ladderEl.style.left=(pool.x+pool.w/2-13)+"px";
     pool.ladderEl.style.top=(pool.y-18)+"px";
-    pool.el.classList.remove("danger");
+    if(pool.type)pool.waterEl.style.background=pool.type.water;
   }else{
     if(pool.ladderEl){pool.ladderEl.remove();pool.ladderEl=null;}
     if(!pool.noLadderEl){
@@ -412,7 +436,7 @@ function updateLadder(){
     }
     pool.noLadderEl.style.left=(pool.x+pool.w/2-13)+"px";
     pool.noLadderEl.style.top=(pool.y-6)+"px";
-    pool.el.classList.add("danger");
+    pool.waterEl.style.background="linear-gradient(180deg,#34506a,#182733)";
   }
 }
 function toggleLadder(){
