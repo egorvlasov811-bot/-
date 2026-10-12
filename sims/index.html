@@ -24,6 +24,8 @@
   .pill{background:var(--panel2);border-radius:999px;padding:7px 14px;font-weight:800;
     display:flex;align-items:center;gap:6px;font-size:15px;box-shadow:0 2px 0 rgba(0,0,0,.25);}
   .pill .ic{font-size:17px;}
+  .pill.tap{cursor:pointer;}
+  .pill.tap:active{transform:translateY(1px);}
   .title{margin-left:auto;font-size:13px;opacity:.7;font-weight:700;}
 
   /* ---------- Сцена ---------- */
@@ -41,7 +43,17 @@
                repeating-linear-gradient(-55deg,#2f7d20 0 2px,transparent 2px 11px);}
   /* дорожка-плитка снизу для вида */
   .fence{position:absolute;inset:0;pointer-events:none;border-radius:18px;
-    box-shadow:inset 0 0 0 3px rgba(255,255,255,.08);}
+    box-shadow:inset 0 0 0 3px rgba(255,255,255,.08);z-index:8100;}
+  /* ---- день/ночь ---- */
+  .sky{position:absolute;inset:0;pointer-events:none;border-radius:18px;z-index:8000;
+    background:#0a1a3c;opacity:0;transition:opacity .6s linear,background .6s linear;}
+  .stars{position:absolute;inset:0;pointer-events:none;border-radius:18px;z-index:8050;opacity:0;
+    transition:opacity .8s linear;}
+  .stars i{position:absolute;width:2px;height:2px;background:#fff;border-radius:50%;
+    box-shadow:0 0 3px #fff;animation:tw 2.5s ease-in-out infinite;}
+  @keyframes tw{0%,100%{opacity:.3;}50%{opacity:1;}}
+  .celestial{position:absolute;font-size:26px;z-index:8060;pointer-events:none;
+    transform:translate(-50%,-50%);filter:drop-shadow(0 0 8px rgba(255,220,120,.7));transition:none;}
 
   /* ---------- Бассейн ---------- */
   .pool{position:absolute;border-radius:14px;overflow:hidden;
@@ -164,11 +176,16 @@
   <div class="topbar">
     <div class="pill"><span class="ic">🪙</span><span id="coins">0</span></div>
     <div class="pill"><span class="ic">🧍</span><span id="simCount">0</span></div>
+    <div class="pill tap" id="timePill"><span class="ic" id="timeIc">☀️</span></div>
+    <div class="pill tap" id="muteBtn"><span class="ic" id="muteIc">🔊</span></div>
     <div class="title">Pool Party 🏖️</div>
   </div>
 
   <div class="stage-wrap">
     <div id="stage">
+      <div class="sky" id="sky"></div>
+      <div class="stars" id="stars"></div>
+      <div class="celestial" id="celestial">☀️</div>
       <div class="fence"></div>
       <div class="hint" id="hint"></div>
     </div>
@@ -195,6 +212,7 @@
     <div style="font-size:13px;opacity:.8">Баланс: <b>🪙 <span id="coins2">0</span></b></div>
     <div class="tabs">
       <button class="tab on" data-tab="skins">🎨 Скины</button>
+      <button class="tab" data-tab="pools">🏊 Бассейны</button>
       <button class="tab" data-tab="sims">🧍 Персонажи</button>
       <button class="tab" data-tab="decor">🌳 Декор</button>
     </div>
@@ -213,11 +231,45 @@ if(tg){try{tg.ready();tg.expand();tg.setHeaderColor&&tg.setHeaderColor("#13351f"
 function haptic(t){try{tg&&tg.HapticFeedback&&tg.HapticFeedback.impactOccurred(t||"light");}catch(e){}}
 
 /* =========================================================================
+   Звук (синтез через WebAudio — файлы не нужны, работает офлайн)
+   ========================================================================= */
+let audioCtx=null;
+function ensureAudio(){
+  try{
+    if(!audioCtx){audioCtx=new (window.AudioContext||window.webkitAudioContext)();}
+    if(audioCtx.state==="suspended")audioCtx.resume();
+  }catch(e){}
+}
+function tone(freq,dur,type,vol,slideTo,delay){
+  if(saveMuted())return;
+  ensureAudio();if(!audioCtx)return;
+  const t=audioCtx.currentTime+(delay||0);
+  const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+  o.type=type||"sine";o.frequency.setValueAtTime(freq,t);
+  if(slideTo)o.frequency.exponentialRampToValueAtTime(Math.max(1,slideTo),t+dur);
+  g.gain.setValueAtTime(vol||0.18,t);
+  g.gain.exponentialRampToValueAtTime(0.0008,t+dur);
+  o.connect(g).connect(audioCtx.destination);
+  o.start(t);o.stop(t+dur+0.02);
+}
+function saveMuted(){return save.muted;}
+const sfx={
+  splash(){tone(520,0.14,"sine",0.22,180);tone(300,0.12,"sine",0.14,120,0.05);},
+  bubble(){ // «буль-буль» — несколько низких булькающих тонов вниз
+    [ [280,0], [230,0.15], [190,0.3], [150,0.47] ].forEach(([f,d])=>tone(f,0.16,"sine",0.26,f*0.6,d));
+  },
+  coin(){tone(880,0.07,"square",0.14,1300);tone(1320,0.08,"square",0.12,1600,0.06);},
+  click(){tone(420,0.05,"square",0.1,320);},
+  evil(){tone(200,0.25,"sawtooth",0.14,90);}, // при снятии лестницы со пловцом
+};
+
+/* =========================================================================
    Данные: скины, декор
    ========================================================================= */
 const SKINS = [
   {id:"classic", emoji:"🙂", body:"#4a90d9", name:"Классик",  price:0},
   {id:"girl",    emoji:"👧", body:"#e84f8c", name:"Подружка", price:0},
+  {id:"boy",     emoji:"👦", body:"#2e86de", name:"Пацан",    price:0},
   {id:"red",     emoji:"🧑‍🦰", body:"#e67e22", name:"Рыжик",   price:40},
   {id:"cool",    emoji:"😎", body:"#2c3e50", name:"Крутыш",   price:70},
   {id:"cowboy",  emoji:"🤠", body:"#a0522d", name:"Ковбой",   price:120},
@@ -239,6 +291,14 @@ const DECOR = [
 ];
 const decorById = id => DECOR.find(d=>d.id===id);
 
+const POOLS = [
+  {id:"puddle",  emoji:"💧", name:"Лужа",    w:120, h:92,  price:0},
+  {id:"classic", emoji:"🏊", name:"Классик", w:170, h:120, price:0},
+  {id:"big",     emoji:"🏖️", name:"Большой", w:228, h:150, price:150},
+  {id:"lagoon",  emoji:"🌊", name:"Лагуна",  w:290, h:178, price:400},
+];
+const poolTypeById = id => POOLS.find(p=>p.id===id) || POOLS[1];
+
 const NEW_SIM_PRICE = 100;
 const DROWN_MS = 3*60*1000; // 3 минуты
 
@@ -246,7 +306,8 @@ const DROWN_MS = 3*60*1000; // 3 минуты
    Сохранение (монеты, купленные скины, декор)
    ========================================================================= */
 const SAVE_KEY = "poolparty_v1";
-let save = {coins:120, ownedSkins:["classic","girl"], decor:[]};
+let save = {coins:120, ownedSkins:["classic","girl","boy"], decor:[],
+  pools:["puddle","classic"], activePool:"classic", muted:false};
 try{const s=JSON.parse(localStorage.getItem(SAVE_KEY));if(s&&typeof s==="object")save=Object.assign(save,s);}catch(e){}
 function persist(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(save));}catch(e){}}
 
@@ -283,7 +344,8 @@ function randGrassPoint(){
    Бассейн и лестница
    ========================================================================= */
 function placePool(cx,cy){
-  const w=170,h=120;
+  const pt=poolTypeById(save.activePool);
+  const w=pt.w,h=pt.h;
   const x=clamp(cx-w/2,14,W-w-14);
   const y=clamp(cy-h/2,70,H-h-20);
   const el=document.createElement("div");el.className="pool";
@@ -313,6 +375,18 @@ function removePool(){
   document.getElementById("btnLadder").classList.remove("on");
   document.getElementById("btnPoolLabel").textContent="Бассейн";
   document.getElementById("btnPool").classList.remove("warn");
+}
+function resizePoolTo(pt){
+  if(!pool)return;
+  const cx=pool.x+pool.w/2, cy=pool.y+pool.h/2;
+  const w=pt.w,h=pt.h;
+  pool.w=w;pool.h=h;
+  pool.x=clamp(cx-w/2,14,W-w-14);
+  pool.y=clamp(cy-h/2,70,H-h-20);
+  pool.el.style.left=pool.x+"px";pool.el.style.top=pool.y+"px";
+  pool.el.style.width=w+"px";pool.el.style.height=h+"px";
+  pool.el.style.zIndex=Math.floor(pool.y+h);
+  updateLadder();
 }
 function ladderPoint(){ // точка у лестницы (снаружи, сверху бассейна)
   return {x:pool.x+pool.w/2, y:pool.y-6};
@@ -351,12 +425,14 @@ function toggleLadder(){
   if(!pool.hasLadder){
     if(swimmers.length){
       swimmers.forEach(s=>{if(s.state==="swim"){s.state="panic";s.drownStart=performance.now();}});
-      haptic("heavy");
+      haptic("heavy");sfx.evil();
       toast("😈 Лестница убрана! У них 3 минуты…");
     }else{
+      sfx.click();
       toast("Лестница убрана");
     }
   }else{
+    sfx.click();
     swimmers.forEach(s=>{if(s.state==="panic"){s.state="swim";s.drownStart=0;}});
     toast("Лестница на месте — все спасены 😅");
   }
@@ -410,6 +486,7 @@ function petSim(sim){
   sim.petCd=now+2500;
   addCoins(5);
   spawnFx(sim.x,sim.y-50,"floatInner","+5 🪙");
+  sfx.coin();
   haptic("light");
 }
 function spawnFx(x,y,cls,content){
@@ -421,6 +498,7 @@ function spawnFx(x,y,cls,content){
 }
 function drown(sim){
   spawnFx(sim.x,sim.y,"ghostInner","👻");
+  sfx.bubble();
   haptic("heavy");
   if(selected===sim)deselect();
   sim.el.remove();
@@ -435,6 +513,7 @@ function drown(sim){
 let last=performance.now();
 function loop(now){
   const dt=Math.min(0.05,(now-last)/1000);last=now;
+  updateDayNight(now);
   for(const sim of sims){
     stepSim(sim,dt,now);
     drawSim(sim);
@@ -460,6 +539,7 @@ function stepSim(sim,dt,now){
       sim.state="swim";sim.el.classList.add("swimming");
       sim.x=pool.x+20+Math.random()*(pool.w-40);
       sim.y=pool.y+pool.h/2+ (Math.random()*20-10);
+      sfx.splash();
       if(!pool.hasLadder){sim.state="panic";sim.drownStart=now;}
     }
   }
@@ -517,6 +597,38 @@ function updateHud(){
   document.getElementById("coins").textContent=save.coins;
   document.getElementById("coins2").textContent=save.coins;
   document.getElementById("simCount").textContent=sims.length;
+}
+
+/* =========================================================================
+   Цикл день / ночь
+   ========================================================================= */
+const CYCLE_MS=120000; // полный день за 2 минуты
+let dayStart=performance.now();
+const skyEl=document.getElementById("sky");
+const starsEl=document.getElementById("stars");
+const celEl=document.getElementById("celestial");
+function buildStars(){
+  let h="";
+  for(let i=0;i<46;i++){
+    const x=(Math.random()*100).toFixed(1), y=(Math.random()*60).toFixed(1), d=(Math.random()*2.5).toFixed(2);
+    h+=`<i style="left:${x}%;top:${y}%;animation-delay:${d}s"></i>`;
+  }
+  starsEl.innerHTML=h;
+}
+function updateDayNight(now){
+  const phase=((now-dayStart)%CYCLE_MS)/CYCLE_MS;      // 0 = полдень
+  const ang=phase*2*Math.PI;
+  const darkness=(1-Math.cos(ang))/2;                   // 0 полдень .. 1 полночь
+  skyEl.style.opacity=(darkness*0.62).toFixed(3);
+  const col=darkness<0.6?[70,30,80]:[10,22,60];         // сумерки тёплые, ночь синяя
+  skyEl.style.background=`rgb(${col[0]},${col[1]},${col[2]})`;
+  starsEl.style.opacity=clamp((darkness-0.45)*2.4,0,1).toFixed(2);
+  const isDay=darkness<0.5;
+  const a=isDay?ang:ang-Math.PI;                        // светило всегда «над горизонтом» в свой период
+  celEl.style.left=(50+42*Math.sin(a)).toFixed(1)+"%";
+  celEl.style.top=(38-Math.cos(a)*26).toFixed(1)+"%";
+  celEl.textContent=isDay?"☀️":"🌙";
+  const ic=document.getElementById("timeIc");if(ic)ic.textContent=isDay?"☀️":"🌙";
 }
 
 /* =========================================================================
@@ -604,10 +716,34 @@ function renderShop(){
           if(save.coins<sk.price){toast("Не хватает монет 🪙");return;}
           addCoins(-sk.price);save.ownedSkins.push(sk.id);persist();
           if(skinTargetSim){skinTargetSim.skinId=sk.id;applySkin(skinTargetSim);renderCtx();}
-          toast("Скин куплен и надет! 🎉");renderShop();
+          sfx.coin();toast("Скин куплен и надет! 🎉");renderShop();
         };}
       card.appendChild(btn);grid.appendChild(card);
     });
+  }
+  else if(shopTab==="pools"){
+    whoRow.style.display="none";
+    POOLS.forEach(pt=>{
+      const owned=save.pools.includes(pt.id);
+      const active=save.activePool===pt.id;
+      const card=document.createElement("div");card.className="card";
+      card.innerHTML=`<div class="emo">${pt.emoji}</div><div class="nm">${pt.name}<br><span style="opacity:.6;font-weight:600">${pt.w}×${pt.h}</span></div>`;
+      const btn=document.createElement("button");btn.className="buy";
+      if(active){btn.classList.add("equipped");btn.textContent="Выбран ✓";btn.disabled=true;}
+      else if(owned){btn.classList.add("owned");btn.textContent="Выбрать";
+        btn.onclick=()=>{save.activePool=pt.id;persist();resizePoolTo(pt);sfx.click();toast("Размер выбран"+(pool?" — бассейн обновлён":""));renderShop();};}
+      else{btn.innerHTML=`<span class="price">🪙 ${pt.price}</span>`;
+        btn.onclick=()=>{
+          if(save.coins<pt.price){toast("Не хватает монет 🪙");return;}
+          addCoins(-pt.price);save.pools.push(pt.id);save.activePool=pt.id;persist();
+          resizePoolTo(pt);sfx.coin();toast("Бассейн куплен и выбран! 🎉");renderShop();
+        };}
+      card.appendChild(btn);grid.appendChild(card);
+    });
+    const info=document.createElement("div");
+    info.style.cssText="grid-column:1/-1;opacity:.75;font-size:12px;margin-top:4px;line-height:1.5";
+    info.textContent="Выбранный размер применяется, когда ставишь бассейн (или сразу к текущему).";
+    grid.appendChild(info);
   }
   else if(shopTab==="sims"){
     whoRow.style.display="none";
@@ -617,7 +753,7 @@ function renderShop(){
     btn.innerHTML=`<span class="price">🪙 ${NEW_SIM_PRICE}</span>`;
     btn.onclick=()=>{
       if(save.coins<NEW_SIM_PRICE){toast("Не хватает монет 🪙");return;}
-      addCoins(-NEW_SIM_PRICE);createSim("classic");toast("Новый житель заселился! 🎉");renderShop();
+      addCoins(-NEW_SIM_PRICE);createSim("classic");sfx.coin();toast("Новый житель заселился! 🎉");renderShop();
     };
     card.appendChild(btn);grid.appendChild(card);
     const info=document.createElement("div");
@@ -636,7 +772,7 @@ function renderShop(){
       btn.onclick=()=>{
         if(save.coins<d.price){toast("Не хватает монет 🪙");return;}
         if(save.decor.length>=DECOR_SPOTS.length){toast("Газон уже заставлен 🌳");return;}
-        addCoins(-d.price);save.decor.push(d.id);persist();renderDecor();toast("Поставлено на газон!");renderShop();
+        addCoins(-d.price);save.decor.push(d.id);persist();renderDecor();sfx.coin();toast("Поставлено на газон!");renderShop();
       };
       card.appendChild(btn);grid.appendChild(card);
     });
@@ -679,6 +815,13 @@ document.getElementById("btnPool").addEventListener("click",()=>{
 document.getElementById("btnLadder").addEventListener("click",toggleLadder);
 document.getElementById("btnShop").addEventListener("click",()=>openShop("skins"));
 document.getElementById("btnHelp").addEventListener("click",showHelp);
+document.addEventListener("pointerdown",ensureAudio,{once:true});
+function updateMuteIc(){document.getElementById("muteIc").textContent=save.muted?"🔇":"🔊";}
+document.getElementById("muteBtn").addEventListener("click",()=>{
+  save.muted=!save.muted;persist();updateMuteIc();
+  if(!save.muted){ensureAudio();sfx.click();}
+});
+document.getElementById("timePill").addEventListener("click",()=>toast("☀️ Солнце ходит по небу — полный день за 2 минуты 🌙"));
 document.getElementById("shopClose").addEventListener("click",closeShop);
 document.getElementById("shop").addEventListener("click",(e)=>{if(e.target.id==="shop")closeShop();});
 document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{shopTab=t.dataset.tab;
@@ -693,10 +836,14 @@ function showHelp(){
    ========================================================================= */
 function start(){
   recalcScale();
-  createSim(save.ownedSkins[0]||"classic");
-  createSim(save.ownedSkins[1]||"girl");
+  buildStars();
+  updateMuteIc();
+  createSim("classic");
+  createSim("girl");
+  createSim("boy");
   renderDecor();
   updateHud();
+  dayStart=performance.now();
   requestAnimationFrame((t)=>{last=t;loop(t);});
   setTimeout(()=>toast("Поставь бассейн 🏊, отправь персонажа купаться и… убери лестницу 😏"),600);
 }
