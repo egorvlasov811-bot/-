@@ -31,6 +31,7 @@ class HistMatch:
     hg: int
     ag: int
     odds: dict = field(default_factory=dict)  # {'1x2':{...},'totals':{..},'btts':{..}}
+    closing: dict = field(default_factory=dict)  # закрывающие кэфы (для CLV), {'1x2':{...}}
 
 
 # ---------------------------------------------------------------- расчёт исходов
@@ -94,6 +95,9 @@ class BacktestResult:
     matches_seen: int = 0
     final_bankroll: Optional[float] = None
     equity_curve: List[float] = field(default_factory=list)
+    clv_sum: float = 0.0      # сумма CLV по ставкам, где известна закрывающая линия
+    clv_n: int = 0            # сколько ставок с известной закрывающей линией
+    clv_beats: int = 0        # на скольких мы взяли кэф ВЫШЕ закрывающего
 
     @property
     def roi(self) -> float:
@@ -102,6 +106,16 @@ class BacktestResult:
     @property
     def hit_rate(self) -> float:
         return (self.wins / self.bets) if self.bets > 0 else 0.0
+
+    @property
+    def mean_clv(self) -> float:
+        """Средний CLV: насколько наш кэф был выше закрывающего (доля)."""
+        return (self.clv_sum / self.clv_n) if self.clv_n > 0 else 0.0
+
+    @property
+    def clv_beat_rate(self) -> float:
+        """Доля ставок, где мы обыграли закрывающую линию (взяли кэф выше)."""
+        return (self.clv_beats / self.clv_n) if self.clv_n > 0 else 0.0
 
 
 def _record(res: BacktestResult, market: str, stake: float, profit: float,
@@ -114,6 +128,26 @@ def _record(res: BacktestResult, market: str, stake: float, profit: float,
     m["bets"] += 1
     m["staked"] += stake
     m["profit"] += profit
+
+
+def _clv(our_odds: float, close_odds: float) -> float:
+    """CLV как относительный выигрыш в цене: our/close - 1 (>0 — взяли лучше)."""
+    return (our_odds / close_odds - 1.0) if close_odds > 0 else 0.0
+
+
+def _record_clv(res: BacktestResult, market: str, sel: str, odds: float,
+                hm: HistMatch) -> None:
+    """Учитывает CLV для 1X2-ставок, если известна закрывающая линия."""
+    if market != "1X2" or not hm.closing:
+        return
+    close = (hm.closing.get("1x2") or {}).get(sel)
+    if not close:
+        return
+    clv = _clv(odds, float(close))
+    res.clv_sum += clv
+    res.clv_n += 1
+    if clv > 0:
+        res.clv_beats += 1
 
 
 def _append_history(hist: Dict[str, List[MatchResult]], m: HistMatch,
@@ -180,6 +214,7 @@ def run_backtest(
             pnl = st * _profit(wfrac, pfrac, odds)
             bank += pnl
             _record(res, market, st, pnl, wfrac)
+            _record_clv(res, market, sel, odds, hm)
             res.equity_curve.append(bank if stake == "kelly" else res.profit)
 
         _append_history(hist, hm, form_window)
@@ -263,11 +298,19 @@ def load_footballdata_csv(path: str) -> List[HistMatch]:
             ou = _first(row, [("B365>2.5", "B365<2.5"), ("Avg>2.5", "Avg<2.5")])
             if ou:
                 odds["totals"] = {"2.5": {"over": ou[0], "under": ou[1]}}
+            # закрывающие 1X2 (суффикс C): Bet365/Pinnacle/среднее
+            closing: dict = {}
+            xc = _first(row, [("B365CH", "B365CD", "B365CA"),
+                              ("PSCH", "PSCD", "PSCA"),
+                              ("AvgCH", "AvgCD", "AvgCA")])
+            if xc:
+                closing["1x2"] = {"home": xc[0], "draw": xc[1], "away": xc[2]}
             try:
                 out.append(HistMatch(
                     date=_norm_date(row.get("Date", "")),
                     home=row["HomeTeam"], away=row["AwayTeam"],
-                    hg=int(row["FTHG"]), ag=int(row["FTAG"]), odds=odds))
+                    hg=int(row["FTHG"]), ag=int(row["FTAG"]), odds=odds,
+                    closing=closing))
             except (ValueError, KeyError):
                 continue
     return out
@@ -301,5 +344,6 @@ def load_json_history(path: str) -> List[HistMatch]:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     return [HistMatch(date=m["date"], home=m["home"], away=m["away"],
-                      hg=int(m["hg"]), ag=int(m["ag"]), odds=m.get("odds", {}))
+                      hg=int(m["hg"]), ag=int(m["ag"]), odds=m.get("odds", {}),
+                      closing=m.get("closing", {}))
             for m in data]

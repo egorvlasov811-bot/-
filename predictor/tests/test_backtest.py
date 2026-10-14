@@ -97,3 +97,45 @@ def test_csv_loader():
         assert matches[0].date == "2023-08-12"  # нормализована для сортировки
     finally:
         os.unlink(path)
+
+
+def test_csv_loader_reads_closing_odds():
+    csv_text = (
+        "Date,HomeTeam,AwayTeam,FTHG,FTAG,B365H,B365D,B365A,"
+        "B365CH,B365CD,B365CA\n"
+        "12/08/23,Arsenal,Chelsea,2,1,1.80,3.60,4.20,1.70,3.70,4.50\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False,
+                                     encoding="utf-8") as f:
+        f.write(csv_text)
+        path = f.name
+    try:
+        m = bt.load_footballdata_csv(path)[0]
+        assert m.closing["1x2"]["home"] == 1.70
+        assert m.closing["1x2"]["away"] == 4.50
+    finally:
+        os.unlink(path)
+
+
+def test_clv_helper():
+    assert abs(bt._clv(2.0, 1.90) - (2.0 / 1.90 - 1.0)) < 1e-12
+    assert bt._clv(1.80, 2.0) < 0        # взяли хуже закрытия
+    assert bt._clv(2.0, 0.0) == 0.0      # нет закрывающей цены
+
+
+def test_backtest_tracks_clv():
+    # один матч с достаточной историей + закрывающая линия ниже нашей (мы в плюсе по CLV)
+    matches = _synthetic_history()
+    for m in matches:
+        # закрытие: хозяева подешевели (наш 2.0 > закрытие 1.90) => beat
+        m.closing = {"1x2": {"home": 1.90, "draw": 3.5, "away": 3.7}}
+    res = bt.run_backtest(matches, min_ev=-1.0, min_matches=4, stake="flat")
+    assert res.clv_n > 0                      # 1X2-ставки с закрывающей линией учтены
+    assert res.clv_n <= res.bets
+    assert 0.0 <= res.clv_beat_rate <= 1.0
+
+
+def test_no_closing_means_no_clv():
+    matches = _synthetic_history()           # closing не задан
+    res = bt.run_backtest(matches, min_ev=-1.0, min_matches=4, stake="flat")
+    assert res.clv_n == 0 and res.mean_clv == 0.0

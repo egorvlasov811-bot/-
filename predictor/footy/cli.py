@@ -18,9 +18,11 @@ from typing import Optional
 from . import accumulator as acc
 from . import backtest as bt
 from . import calibrate as cal
+from . import profile as prof
 from . import ratings as rt
 from . import report
 from . import round_analyzer as ra
+from . import sgp as sgpmod
 from .analysis import LeagueContext, MatchContext, analyze, injury_multiplier
 from .data import get_provider, load_match_file, load_slate_file
 from .examples_data import demo_match
@@ -105,6 +107,20 @@ def cmd_demo(args: argparse.Namespace) -> int:
     return 0
 
 
+def _apply_profile(args: argparse.Namespace, ctx: MatchContext) -> None:
+    """Подхватывает профиль калибровки и применяет его к ctx (если не --no-profile)."""
+    if getattr(args, "no_profile", False):
+        return
+    path = getattr(args, "profile", None) or prof.DEFAULT_PATH
+    loaded = prof.load_profile(path)
+    if not loaded:
+        return
+    applied = prof.apply_to_ctx(ctx, loaded)
+    if applied and not args.json:
+        vals = ", ".join(f"{k}={getattr(ctx, k):g}" for k in applied)
+        print(f"Профиль калибровки применён ({path}): {vals}")
+
+
 def _ratings_prior(args: argparse.Namespace, ctx: MatchContext,
                    home_name: str, away_name: str):
     """Фитит лиговый рейтинг из --ratings и возвращает приор λ для матча."""
@@ -132,6 +148,7 @@ def _ratings_prior(args: argparse.Namespace, ctx: MatchContext,
 
 def cmd_predict(args: argparse.Namespace) -> int:
     home, away, league, ctx, odds = load_match_file(args.input)
+    _apply_profile(args, ctx)
     prior = _ratings_prior(args, ctx, home.name, away.name)
     rep = analyze(home, away, league, ctx, odds, prior=prior)
     _emit(rep, args, odds)
@@ -185,6 +202,7 @@ def cmd_fetch(args: argparse.Namespace) -> int:
 
     league = LeagueContext(home_goals=args.league_home, away_goals=args.league_away)
     ctx = MatchContext(home_mult=home_mult, away_mult=away_mult, notes=notes)
+    _apply_profile(args, ctx)
 
     odds = None
     if args.odds:
@@ -207,6 +225,18 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     points = cal.grid_search(
         matches, metric=args.metric,
         min_matches=args.min_matches, form_window=args.form_window)
+    valid = [p for p in points if p.n > 0]
+    if args.save and valid:
+        best = valid[0]
+        path = prof.save_profile({
+            "rho": best.rho, "decay": best.decay, "shrink_k": best.shrink_k,
+            "metric": args.metric, "n": best.n,
+            "log_loss": round(best.log_loss, 5), "brier": round(best.brier, 5),
+        }, args.profile or prof.DEFAULT_PATH)
+        if not args.json:
+            print(f"Профиль сохранён: {path} "
+                  f"(rho={best.rho:g}, decay={best.decay:g}, "
+                  f"shrink_k={best.shrink_k:g})")
     if args.json:
         print(json.dumps([
             {"rho": p.rho, "decay": p.decay, "shrink_k": p.shrink_k,
@@ -214,6 +244,29 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
             for p in points if p.n > 0][:args.top], ensure_ascii=False, indent=2))
     else:
         print(cal.render_calibration(points, top=args.top, metric=args.metric))
+    return 0
+
+
+def cmd_sgp(args: argparse.Namespace) -> int:
+    home, away, league, ctx, odds = load_match_file(args.input)
+    _apply_profile(args, ctx)
+    prior = _ratings_prior(args, ctx, home.name, away.name)
+    rep = analyze(home, away, league, ctx, odds, prior=prior)
+    res = sgpmod.same_game_parlay(rep, args.pick, book_odds=args.odds)
+    if args.json:
+        print(json.dumps({
+            "home": home.name, "away": away.name,
+            "legs": [{"selection": s, "prob": round(p, 4)} for s, p in res.legs],
+            "joint_prob": round(res.joint_prob, 4),
+            "naive_prob": round(res.naive_prob, 4),
+            "correlation_ratio": round(res.correlation_ratio, 4),
+            "fair_odds": round(res.fair_odds, 3),
+            "book_odds": res.book_odds,
+            "ev": round(res.ev, 4) if res.ev is not None else None,
+            "kelly": round(res.kelly, 4) if res.kelly is not None else None,
+        }, ensure_ascii=False, indent=2))
+    else:
+        print(sgpmod.render_sgp(home.name, away.name, res, bankroll=args.bankroll))
     return 0
 
 
@@ -290,6 +343,8 @@ def cmd_backtest(args: argparse.Namespace) -> int:
             "staked": round(res.staked, 2), "profit": round(res.profit, 2),
             "roi": round(res.roi, 4), "hit_rate": round(res.hit_rate, 4),
             "final_bankroll": res.final_bankroll,
+            "clv_n": res.clv_n, "mean_clv": round(res.mean_clv, 4),
+            "clv_beat_rate": round(res.clv_beat_rate, 4),
             "by_market": {k: {kk: round(vv, 3) for kk, vv in v.items()}
                           for k, v in res.by_market.items()},
         }, ensure_ascii=False, indent=2))
@@ -323,6 +378,7 @@ def cmd_round(args: argparse.Namespace) -> int:
 
     league = LeagueContext(home_goals=args.league_home, away_goals=args.league_away)
     ctx = MatchContext()
+    _apply_profile(args, ctx)
     result = ra.analyze_round(provider, fixtures, league=league, ctx=ctx,
                               last=args.last, odds_map=odds_map,
                               competition=args.competition)
@@ -377,6 +433,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="история лиги (JSON/CSV) для приора силы команд")
     sp.add_argument("--prior-weight", type=float, default=None,
                     help="вес приора силы в бленде с формой [0..1] (деф. 0.5)")
+    sp.add_argument("--profile", default=None,
+                    help="путь к профилю калибровки (автоприменение)")
+    sp.add_argument("--no-profile", action="store_true",
+                    help="игнорировать профиль калибровки")
     sp.set_defaults(func=cmd_predict)
 
     sp = sub.add_parser("fetch", parents=[common],
@@ -402,6 +462,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="история лиги (JSON/CSV) для приора силы команд")
     sp.add_argument("--prior-weight", type=float, default=None,
                     help="вес приора силы в бленде с формой [0..1] (деф. 0.5)")
+    sp.add_argument("--profile", default=None,
+                    help="путь к профилю калибровки (автоприменение)")
+    sp.add_argument("--no-profile", action="store_true",
+                    help="игнорировать профиль калибровки")
     sp.set_defaults(func=cmd_fetch)
 
     # ---- backtest ----
@@ -445,6 +509,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="мин. вероятность ноги для --acca-prob")
     sp.add_argument("--max-legs", type=int, default=4,
                     help="максимум ног в экспрессе")
+    sp.add_argument("--profile", default=None,
+                    help="путь к профилю калибровки (автоприменение)")
+    sp.add_argument("--no-profile", action="store_true",
+                    help="игнорировать профиль калибровки")
     sp.set_defaults(func=cmd_round)
 
     # ---- calibrate ----
@@ -459,6 +527,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="сколько последних матчей держать в форме")
     sp.add_argument("--top", type=int, default=8,
                     help="сколько лучших наборов параметров показать")
+    sp.add_argument("--save", action="store_true",
+                    help="сохранить лучшие параметры в профиль калибровки")
+    sp.add_argument("--profile", default=None,
+                    help=f"путь к профилю (деф. {prof.DEFAULT_PATH})")
     sp.set_defaults(func=cmd_calibrate)
 
     # ---- rate ----
@@ -468,6 +540,25 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--top", type=int, default=20,
                     help="сколько команд показать")
     sp.set_defaults(func=cmd_rate)
+
+    # ---- sgp (экспресс внутри матча) ----
+    sp = sub.add_parser("sgp", parents=[common],
+                        help="экспресс внутри одного матча (учёт корреляции)")
+    sp.add_argument("input", help="путь к JSON с описанием матча (как в predict)")
+    sp.add_argument("--pick", action="append", required=True,
+                    help="исход (повторяй): 1/x/2, 1x/12/x2, btts[_no], "
+                         "'over 2.5', 'under 3.5'")
+    sp.add_argument("--odds", type=float, default=None,
+                    help="кэф букмекера на весь SGP (для расчёта EV)")
+    sp.add_argument("--ratings", default=None,
+                    help="история лиги (JSON/CSV) для приора силы команд")
+    sp.add_argument("--prior-weight", type=float, default=None,
+                    help="вес приора силы [0..1]")
+    sp.add_argument("--profile", default=None,
+                    help="путь к профилю калибровки (автоприменение)")
+    sp.add_argument("--no-profile", action="store_true",
+                    help="игнорировать профиль калибровки")
+    sp.set_defaults(func=cmd_sgp)
 
     # ---- acca (экспрессы) ----
     sp = sub.add_parser("acca", parents=[common],

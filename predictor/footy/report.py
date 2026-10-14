@@ -110,6 +110,9 @@ def render_backtest(res) -> str:
     add(f"Доля зашедших:             {res.hit_rate * 100:.1f}%")
     if res.final_bankroll is not None:
         add(f"Банк (старт→финиш):        → {res.final_bankroll:.2f}")
+    if res.clv_n > 0:
+        add(f"CLV (ср. по 1X2, {res.clv_n} ст.): {res.mean_clv * 100:+.2f}%   "
+            f"обыграли закрытие: {res.clv_beat_rate * 100:.0f}%")
     add("")
     add("Разбивка по рынкам:")
     add(f"  {'Рынок':<16}{'Ставок':>8}{'Оборот':>10}{'Прибыль':>10}{'ROI':>8}")
