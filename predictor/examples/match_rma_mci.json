@@ -1,0 +1,50 @@
+{
+  "league": { "home_goals": 1.55, "away_goals": 1.25 },
+  "context": {
+    "decay": 0.85,
+    "shrink_k": 3.0,
+    "rho": -0.08,
+    "max_goals": 10,
+    "home_mult": 1.0,
+    "away_mult": 0.95,
+    "notes": ["Пример: отредактируй матчи, коэффициенты и поправки под свой матч."]
+  },
+  "home": {
+    "name": "Real Madrid",
+    "matches": [
+      { "gf": 3, "ga": 1, "venue": "H" },
+      { "gf": 2, "ga": 2, "venue": "A" },
+      { "gf": 4, "ga": 0, "venue": "H" },
+      { "gf": 1, "ga": 1, "venue": "A" },
+      { "gf": 2, "ga": 0, "venue": "H" },
+      { "gf": 3, "ga": 2, "venue": "A" },
+      { "gf": 1, "ga": 0, "venue": "H" },
+      { "gf": 2, "ga": 1, "venue": "A" }
+    ]
+  },
+  "away": {
+    "name": "Man City",
+    "matches": [
+      { "gf": 2, "ga": 1, "venue": "A" },
+      { "gf": 3, "ga": 0, "venue": "H" },
+      { "gf": 1, "ga": 1, "venue": "A" },
+      { "gf": 4, "ga": 1, "venue": "H" },
+      { "gf": 0, "ga": 2, "venue": "A" },
+      { "gf": 2, "ga": 2, "venue": "H" },
+      { "gf": 3, "ga": 1, "venue": "A" },
+      { "gf": 1, "ga": 0, "venue": "H" }
+    ]
+  },
+  "odds": {
+    "1x2": { "home": 2.05, "draw": 3.70, "away": 3.40 },
+    "btts": { "yes": 1.66, "no": 2.15 },
+    "totals": {
+      "2.5": { "over": 1.72, "under": 2.08 },
+      "3.5": { "over": 2.60, "under": 1.48 }
+    },
+    "ah": [
+      { "line": -0.5, "home": 1.90, "away": 1.90 },
+      { "line": -1.0, "home": 2.60, "away": 1.48 }
+    ]
+  }
+}
