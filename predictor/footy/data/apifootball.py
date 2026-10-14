@@ -18,13 +18,15 @@ except ImportError:
     requests = None  # type: ignore
 
 from ..analysis import MatchResult, TeamForm
+from .http import HttpClient, client_from_env
 
 BASE_URL = "https://v3.football.api-sports.io"
 
 
 class ApiFootballProvider:
     def __init__(self, key: Optional[str] = None, season: Optional[int] = None,
-                 league_id: int = 2, timeout: int = 15):
+                 league_id: int = 2, timeout: int = 15,
+                 http: Optional[HttpClient] = None):
         self.key = key or os.environ.get("API_FOOTBALL_KEY", "")
         self.season = season
         self.league_id = league_id
@@ -35,15 +37,15 @@ class ApiFootballProvider:
             )
         if requests is None:
             raise RuntimeError("Нужен пакет requests: pip install -r requirements.txt")
+        self.http = http or client_from_env()
+        self.http.timeout = timeout
 
     def _headers(self) -> dict:
         return {"x-apisports-key": self.key}
 
     def _get(self, path: str, params: dict) -> dict:
-        resp = requests.get(f"{BASE_URL}{path}", headers=self._headers(),
-                            params=params, timeout=self.timeout)
-        resp.raise_for_status()
-        return resp.json()
+        return self.http.get_json(f"{BASE_URL}{path}", headers=self._headers(),
+                                  params=params)
 
     def resolve_team(self, name: str) -> int:
         data = self._get("/teams", {"search": name})

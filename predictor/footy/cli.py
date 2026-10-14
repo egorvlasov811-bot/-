@@ -18,6 +18,7 @@ from typing import Optional
 from . import accumulator as acc
 from . import backtest as bt
 from . import calibrate as cal
+from . import ratings as rt
 from . import report
 from . import round_analyzer as ra
 from .analysis import LeagueContext, MatchContext, analyze, injury_multiplier
@@ -104,10 +105,54 @@ def cmd_demo(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ratings_prior(args: argparse.Namespace, ctx: MatchContext,
+                   home_name: str, away_name: str):
+    """Фитит лиговый рейтинг из --ratings и возвращает приор λ для матча."""
+    path = getattr(args, "ratings", None)
+    if not path:
+        return None
+    if path.lower().endswith(".json"):
+        matches = bt.load_json_history(path)
+    else:
+        matches = bt.load_footballdata_csv(path)
+    book = rt.fit_ratings(matches)
+    pw = getattr(args, "prior_weight", None)
+    if pw and pw > 0:
+        ctx.prior_weight = pw
+    elif ctx.prior_weight <= 0:
+        ctx.prior_weight = 0.5  # дефолт, если рейтинг задан, а вес — нет
+    lh, la = book.expected_goals(home_name, away_name)
+    if not args.json:
+        known = home_name in book.teams and away_name in book.teams
+        tag = "" if known else " [команды нет в истории → средняя сила лиги]"
+        print(f"Приор силы: {home_name} {lh:.2f} — {la:.2f} {away_name} "
+              f"(вес {ctx.prior_weight:.0%}, лига {len(book.teams)} команд){tag}")
+    return (lh, la)
+
+
 def cmd_predict(args: argparse.Namespace) -> int:
     home, away, league, ctx, odds = load_match_file(args.input)
-    rep = analyze(home, away, league, ctx, odds)
+    prior = _ratings_prior(args, ctx, home.name, away.name)
+    rep = analyze(home, away, league, ctx, odds, prior=prior)
     _emit(rep, args, odds)
+    return 0
+
+
+def cmd_rate(args: argparse.Namespace) -> int:
+    if args.input.lower().endswith(".json"):
+        matches = bt.load_json_history(args.input)
+    else:
+        matches = bt.load_footballdata_csv(args.input)
+    book = rt.fit_ratings(matches)
+    if args.json:
+        print(json.dumps({
+            "mu": round(book.mu, 4), "home_adv": round(book.home_adv, 4),
+            "teams": {t: {"attack": round(r.attack, 4),
+                          "defense": round(r.defense, 4), "games": r.games}
+                      for t, r in book.teams.items()},
+        }, ensure_ascii=False, indent=2))
+    else:
+        print(rt.render_ratings(book, top=args.top))
     return 0
 
 
@@ -146,7 +191,8 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         with open(args.odds, "r", encoding="utf-8") as f:
             odds = json.load(f)
 
-    rep = analyze(home_form, away_form, league, ctx, odds)
+    prior = _ratings_prior(args, ctx, args.home, args.away)
+    rep = analyze(home_form, away_form, league, ctx, odds, prior=prior)
     if notes and not args.json:
         print("; ".join(notes))
     _emit(rep, args, odds)
@@ -327,6 +373,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("predict", parents=[common],
                         help="разбор матча из JSON-файла")
     sp.add_argument("input", help="путь к JSON с описанием матча")
+    sp.add_argument("--ratings", default=None,
+                    help="история лиги (JSON/CSV) для приора силы команд")
+    sp.add_argument("--prior-weight", type=float, default=None,
+                    help="вес приора силы в бленде с формой [0..1] (деф. 0.5)")
     sp.set_defaults(func=cmd_predict)
 
     sp = sub.add_parser("fetch", parents=[common],
@@ -348,6 +398,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="подтянуть xG по каждому матчу (API-Football, ест лимит)")
     sp.add_argument("--injuries", action="store_true",
                     help="учесть травмы автоматически (API-Football)")
+    sp.add_argument("--ratings", default=None,
+                    help="история лиги (JSON/CSV) для приора силы команд")
+    sp.add_argument("--prior-weight", type=float, default=None,
+                    help="вес приора силы в бленде с формой [0..1] (деф. 0.5)")
     sp.set_defaults(func=cmd_fetch)
 
     # ---- backtest ----
@@ -406,6 +460,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--top", type=int, default=8,
                     help="сколько лучших наборов параметров показать")
     sp.set_defaults(func=cmd_calibrate)
+
+    # ---- rate ----
+    sp = sub.add_parser("rate", parents=[common],
+                        help="рейтинг силы команд по истории лиги")
+    sp.add_argument("input", help="CSV (football-data.co.uk) или JSON с историей")
+    sp.add_argument("--top", type=int, default=20,
+                    help="сколько команд показать")
+    sp.set_defaults(func=cmd_rate)
 
     # ---- acca (экспрессы) ----
     sp = sub.add_parser("acca", parents=[common],

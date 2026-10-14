@@ -19,12 +19,14 @@ except ImportError:  # requests не обязателен для оффлайн-
     requests = None  # type: ignore
 
 from ..analysis import MatchResult, TeamForm
+from .http import HttpClient, client_from_env
 
 BASE_URL = "https://api.football-data.org/v4"
 
 
 class FootballDataProvider:
-    def __init__(self, token: Optional[str] = None, timeout: int = 15):
+    def __init__(self, token: Optional[str] = None, timeout: int = 15,
+                 http: Optional[HttpClient] = None):
         self.token = token or os.environ.get("FOOTBALL_DATA_TOKEN", "")
         self.timeout = timeout
         if not self.token:
@@ -34,17 +36,16 @@ class FootballDataProvider:
             )
         if requests is None:
             raise RuntimeError("Нужен пакет requests: pip install -r requirements.txt")
+        self.http = http or client_from_env()
+        self.http.timeout = timeout
         self._team_cache: Dict[str, int] = {}
 
     def _get(self, path: str, params: Optional[dict] = None) -> dict:
-        resp = requests.get(
+        return self.http.get_json(
             f"{BASE_URL}{path}",
             headers={"X-Auth-Token": self.token},
             params=params or {},
-            timeout=self.timeout,
         )
-        resp.raise_for_status()
-        return resp.json()
 
     def resolve_team(self, name: str, competition: str = "CL") -> int:
         """Находит ID команды по названию среди участников турнира."""

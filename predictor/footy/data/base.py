@@ -58,6 +58,7 @@ def match_from_dict(data: dict):
         use_xg=bool(c.get("use_xg", True)),
         home_mult=float(c.get("home_mult", 1.0)),
         away_mult=float(c.get("away_mult", 1.0)),
+        prior_weight=float(c.get("prior_weight", 0.0)),
         notes=list(c.get("notes", [])),
     )
 

@@ -60,6 +60,8 @@ class MatchContext:
     # ручные множители к ожидаемым голам (травмы, усталость, мотивация):
     home_mult: float = 1.0
     away_mult: float = 1.0
+    # вес приора силы команды (лиговый рейтинг) в бленде с λ по форме [0..1]:
+    prior_weight: float = 0.0
     notes: List[str] = field(default_factory=list)
 
 
@@ -175,9 +177,19 @@ def analyze(
     odds: Optional[dict] = None,
     total_lines: Tuple[float, ...] = (1.5, 2.5, 3.5),
     handicap_lines: Tuple[float, ...] = (-1.5, -1.0, -0.5, 0.5, 1.0, 1.5),
+    prior: Optional[Tuple[float, float]] = None,
 ) -> MatchReport:
-    """Полный разбор матча + поиск value при наличии коэффициентов."""
+    """Полный разбор матча + поиск value при наличии коэффициентов.
+
+    prior — ожидаемые голы (λ_home, λ_away) из лигового рейтинга силы. Если
+    задан и ctx.prior_weight>0, λ по форме смешивается с приором:
+    λ = (1-w)·λ_форма + w·λ_приор. Это гасит перекос формы на тонкой выборке.
+    """
     lam_home, lam_away = expected_lambdas(home, away, league, ctx)
+    if prior is not None and ctx.prior_weight > 0:
+        w = min(max(ctx.prior_weight, 0.0), 1.0)
+        lam_home = (1 - w) * lam_home + w * prior[0]
+        lam_away = (1 - w) * lam_away + w * prior[1]
     matrix = poisson.score_matrix(lam_home, lam_away, ctx.max_goals, ctx.rho)
 
     oxt = markets.outcome_1x2(matrix)
