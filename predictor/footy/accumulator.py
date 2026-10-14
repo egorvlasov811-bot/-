@@ -260,6 +260,101 @@ def collect_legs(
     return legs
 
 
+# ----------------------------------------------- экспрессы по вероятности захода
+# «Безопасное меню» рынков с высоким шансом прохода. Для каждого матча берём
+# ОДИН самый вероятный исход из этого набора — так экспресс максимизирует P.
+def best_prob_leg(label: str, report, *, min_prob: float = 0.60,
+                  min_odds: float = 1.05) -> Optional[AccaLeg]:
+    """Самая вероятная «разумная» нога матча (двойной шанс / тоталы / BTTS).
+
+    Коэффициентов не требует — работает на одной модели. book_odds = честный
+    кэф (1/P), чтобы показать «справедливую» цену ноги. Возвращает None, если
+    даже лучший исход ниже min_prob (матч слишком близкий для надёжной ноги)
+    или его честный кэф ниже min_odds (почти гарантия — в экспресс бессмысленна).
+    """
+    cands: List[tuple] = []  # (prob, market, selection)
+    dc = report.double_chance
+    dc_name = {"1X": "1X (хозяева не проиграют)", "12": "12 (без ничьей)",
+               "X2": "X2 (гости не проиграют)"}
+    for k, v in dc.items():
+        cands.append((v, "Двойной шанс", dc_name[k]))
+    t15 = report.totals.get(1.5)
+    if t15:
+        cands.append((t15["over"], "Тотал 1.5", "Больше 1.5"))
+    t35 = report.totals.get(3.5)
+    if t35:
+        cands.append((t35["under"], "Тотал 3.5", "Меньше 3.5"))
+    b = report.btts
+    cands.append((b["no"], "BTTS", "Обе забьют: Нет"))
+
+    cands.sort(key=lambda c: c[0], reverse=True)
+    for prob, market, sel in cands:
+        if prob <= 0:
+            continue
+        fair = 1.0 / prob
+        if prob >= min_prob and fair >= min_odds:
+            return AccaLeg(label, market, sel, prob, round(fair, 2))
+    return None
+
+
+def build_prob_accumulators(
+    legs: Sequence[AccaLeg],
+    *,
+    max_legs: int = 4,
+    min_leg_prob: float = 0.60,
+    min_combined_prob: float = 0.0,
+) -> Tuple[List[Accumulator], int]:
+    """Экспрессы, ОТСОРТИРОВАННЫЕ по вероятности прохода (не по EV).
+
+    Одна нога на матч (самая вероятная), top-k по вероятности → максимум
+    совместной P при k ногах. Возвращает (accas 2..max_legs, сколько ног учтено).
+    book_odds тут — честные кэфы, поэтому итоговый кэф = справедливая цена P.
+    """
+    kept = [l for l in legs if l.model_prob >= min_leg_prob]
+    best: Dict[str, AccaLeg] = {}
+    for l in kept:
+        cur = best.get(l.match)
+        if cur is None or l.model_prob > cur.model_prob:
+            best[l.match] = l
+    ordered = sorted(best.values(), key=lambda l: l.model_prob, reverse=True)
+    accas: List[Accumulator] = []
+    for k in range(2, min(max_legs, len(ordered)) + 1):
+        a = combine(ordered[:k])
+        if a.model_prob >= min_combined_prob:
+            accas.append(a)
+    return accas, len(ordered)
+
+
+def render_prob_accumulators(accas: List[Accumulator], legs_considered: int,
+                             *, bankroll: Optional[float] = None) -> str:
+    """Отчёт по экспрессам, отранжированным по вероятности захода."""
+    lines: List[str] = []
+    add = lines.append
+    add("=" * 64)
+    add("  ЭКСПРЕССЫ ПО ВЕРОЯТНОСТИ ЗАХОДА (макс. P прохода)")
+    add("=" * 64)
+    add(f"Надёжных ног (P по модели) учтено: {legs_considered}")
+    add("Кэфы — СПРАВЕДЛИВЫЕ (1/P модели). Реальные кэфы букмекера сверь сам;")
+    add("высокая вероятность захода обычно означает низкий кэф и часто −EV.")
+    if not accas:
+        add("")
+        add("Нет пары достаточно надёжных ног. Снизь --min-prob или добавь матчей.")
+        return "\n".join(lines)
+    for a in accas:
+        add("")
+        add("-" * 64)
+        add(f"  {a.folds}-fold — P прохода {a.model_prob*100:.1f}%  "
+            f"(справедливый кэф {a.book_odds:.2f})")
+        add("-" * 64)
+        for leg in a.legs:
+            add(f"   • {leg.match[:32]:<32} {leg.selection:<28} "
+                f"P={leg.model_prob*100:4.1f}%")
+    add("")
+    add("Чем больше ног — тем выше кэф, но ниже шанс, что зайдут ВСЕ.")
+    add("Для реальной ставки бери те же ноги и подставь кэфы своей конторы.")
+    return "\n".join(lines)
+
+
 def legs_from_value_bets(labelled_bets) -> List[AccaLeg]:
     """Конвертирует [(label, ValueBet)] в ноги (без market_prob → бленд=модель).
 

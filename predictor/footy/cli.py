@@ -173,9 +173,22 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
 
 def cmd_acca(args: argparse.Namespace) -> int:
     slate = load_slate_file(args.input)
-    legs = []
+    reports = []
     for label, home, away, league, ctx, odds in slate:
-        rep = analyze(home, away, league, ctx, odds)
+        reports.append((label, analyze(home, away, league, ctx, odds), odds))
+
+    if args.by_prob:  # экспрессы по вероятности захода (коэффициенты не нужны)
+        legs = [acc.best_prob_leg(lbl, rep, min_prob=args.min_prob)
+                for lbl, rep, _ in reports]
+        legs = [l for l in legs if l is not None]
+        accas, considered = acc.build_prob_accumulators(
+            legs, max_legs=args.max_legs, min_leg_prob=args.min_prob)
+        print(acc.render_prob_accumulators(accas, considered,
+                                           bankroll=args.bankroll))
+        return 0
+
+    legs = []
+    for label, rep, odds in reports:
         legs.extend(acc.collect_legs(label, rep, odds))
     sug = acc.build_accumulators(
         legs, max_legs=args.max_legs, min_leg_ev=args.min_ev,
@@ -274,6 +287,16 @@ def cmd_round(args: argparse.Namespace) -> int:
                                      min_leg_ev=0.0)
         print()
         print(acc.render_accumulators(sug, bankroll=args.bankroll))
+    if args.acca_prob:
+        legs = [acc.best_prob_leg(f"{s.home} — {s.away}", s.report,
+                                  min_prob=args.min_prob)
+                for s in result.summaries if not s.error]
+        legs = [l for l in legs if l is not None]
+        accas, considered = acc.build_prob_accumulators(
+            legs, max_legs=args.max_legs, min_leg_prob=args.min_prob)
+        print()
+        print(acc.render_prob_accumulators(accas, considered,
+                                           bankroll=args.bankroll))
     return 0
 
 
@@ -361,7 +384,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--league-home", type=float, default=1.50)
     sp.add_argument("--league-away", type=float, default=1.15)
     sp.add_argument("--acca", action="store_true",
-                    help="предложить экспрессы из топ value-ставок тура")
+                    help="предложить value-экспрессы из топ-ставок тура")
+    sp.add_argument("--acca-prob", action="store_true",
+                    help="предложить экспрессы с макс. вероятностью захода")
+    sp.add_argument("--min-prob", type=float, default=0.60,
+                    help="мин. вероятность ноги для --acca-prob")
     sp.add_argument("--max-legs", type=int, default=4,
                     help="максимум ног в экспрессе")
     sp.set_defaults(func=cmd_round)
@@ -384,6 +411,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("acca", parents=[common],
                         help="собрать экспрессы из слейта матчей (оффлайн)")
     sp.add_argument("input", help="JSON-слейт: список матчей с коэффициентами")
+    sp.add_argument("--by-prob", action="store_true",
+                    help="экспрессы по вероятности захода (кэфы не нужны)")
+    sp.add_argument("--min-prob", type=float, default=0.60,
+                    help="мин. вероятность ноги для --by-prob")
     sp.add_argument("--max-legs", type=int, default=4,
                     help="максимум ног в экспрессе")
     sp.add_argument("--min-ev", type=float, default=0.0,

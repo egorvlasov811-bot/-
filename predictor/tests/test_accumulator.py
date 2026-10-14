@@ -127,3 +127,54 @@ def test_collect_legs_builds_market_probs_and_labels():
 
 def test_collect_legs_no_odds_empty():
     assert acc.collect_legs("x", _Rep(), None) == []
+
+
+class _RepDC:
+    """Заглушка с двойным шансом и тоталами для best_prob_leg."""
+    def __init__(self, home=0.7, draw=0.2, away=0.1):
+        self.double_chance = {"1X": home + draw, "12": home + away,
+                              "X2": draw + away}
+        self.btts = {"yes": 0.45, "no": 0.55}
+        self.totals = {1.5: {"over": 0.80, "under": 0.20, "push": 0.0},
+                       3.5: {"over": 0.30, "under": 0.70, "push": 0.0}}
+
+
+def test_best_prob_leg_picks_highest():
+    leg = acc.best_prob_leg("A", _RepDC(0.7, 0.2, 0.1), min_prob=0.5)
+    assert leg is not None
+    # 1X = 0.9 — самый вероятный исход в меню
+    assert abs(leg.model_prob - 0.9) < 1e-9
+    assert leg.selection.startswith("1X")
+    assert abs(leg.book_odds - round(1 / 0.9, 2)) < 1e-9  # честный кэф
+
+
+def test_best_prob_leg_below_threshold_returns_none():
+    # близкий матч: максимум из меню ниже min_prob
+    leg = acc.best_prob_leg("A", _RepDC(0.34, 0.33, 0.33), min_prob=0.95)
+    assert leg is None
+
+
+def test_build_prob_accumulators_sorted_by_probability():
+    legs = [
+        AccaLeg("A", "Двойной шанс", "1X", 0.90, 1.11),
+        AccaLeg("B", "Двойной шанс", "1X", 0.85, 1.18),
+        AccaLeg("C", "Тотал 1.5", "Больше 1.5", 0.75, 1.33),
+    ]
+    accas, considered = acc.build_prob_accumulators(legs, max_legs=3,
+                                                    min_leg_prob=0.6)
+    assert considered == 3
+    sizes = [a.folds for a in accas]
+    assert sizes == [2, 3]
+    two = accas[0]
+    # 2-fold = две самые вероятные ноги (A и B), P = 0.9*0.85
+    assert abs(two.model_prob - 0.765) < 1e-9
+    # с ростом числа ног совместная вероятность падает
+    assert accas[0].model_prob > accas[1].model_prob
+
+
+def test_build_prob_accumulators_filters_low_prob_legs():
+    legs = [AccaLeg("A", "m", "s", 0.90, 1.11),
+            AccaLeg("B", "m", "s", 0.40, 2.5)]  # ниже порога
+    accas, considered = acc.build_prob_accumulators(legs, min_leg_prob=0.6)
+    assert considered == 1          # вторая нога отброшена
+    assert accas == []              # на одну ногу экспресс не собрать
