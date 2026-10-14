@@ -1,0 +1,72 @@
+{
+  "matches": [
+    {
+      "home": {"name": "Real Madrid", "matches": [
+        {"gf": 3, "ga": 0, "venue": "H"}, {"gf": 2, "ga": 1, "venue": "A"},
+        {"gf": 4, "ga": 1, "venue": "H"}, {"gf": 2, "ga": 0, "venue": "A"},
+        {"gf": 3, "ga": 1, "venue": "H"}, {"gf": 1, "ga": 0, "venue": "A"}
+      ]},
+      "away": {"name": "Getafe", "matches": [
+        {"gf": 0, "ga": 2, "venue": "A"}, {"gf": 1, "ga": 1, "venue": "H"},
+        {"gf": 0, "ga": 1, "venue": "A"}, {"gf": 1, "ga": 2, "venue": "H"},
+        {"gf": 0, "ga": 0, "venue": "A"}, {"gf": 1, "ga": 3, "venue": "H"}
+      ]},
+      "odds": {
+        "1x2": {"home": 1.62, "draw": 4.20, "away": 6.00},
+        "btts": {"yes": 2.30, "no": 1.60},
+        "totals": {"2.5": {"over": 1.70, "under": 2.15}}
+      }
+    },
+    {
+      "home": {"name": "Man City", "matches": [
+        {"gf": 2, "ga": 1, "venue": "H"}, {"gf": 3, "ga": 0, "venue": "A"},
+        {"gf": 2, "ga": 2, "venue": "H"}, {"gf": 4, "ga": 1, "venue": "A"},
+        {"gf": 1, "ga": 0, "venue": "H"}, {"gf": 3, "ga": 1, "venue": "A"}
+      ]},
+      "away": {"name": "Brighton", "matches": [
+        {"gf": 1, "ga": 1, "venue": "A"}, {"gf": 2, "ga": 2, "venue": "H"},
+        {"gf": 1, "ga": 2, "venue": "A"}, {"gf": 0, "ga": 1, "venue": "H"},
+        {"gf": 2, "ga": 1, "venue": "A"}, {"gf": 1, "ga": 1, "venue": "H"}
+      ]},
+      "odds": {
+        "1x2": {"home": 1.50, "draw": 4.60, "away": 6.50},
+        "btts": {"yes": 1.85, "no": 1.95},
+        "totals": {"2.5": {"over": 1.55, "under": 2.45}}
+      }
+    },
+    {
+      "home": {"name": "Bayern", "matches": [
+        {"gf": 4, "ga": 1, "venue": "H"}, {"gf": 3, "ga": 2, "venue": "A"},
+        {"gf": 5, "ga": 0, "venue": "H"}, {"gf": 2, "ga": 1, "venue": "A"},
+        {"gf": 3, "ga": 1, "venue": "H"}, {"gf": 2, "ga": 2, "venue": "A"}
+      ]},
+      "away": {"name": "Augsburg", "matches": [
+        {"gf": 1, "ga": 2, "venue": "A"}, {"gf": 1, "ga": 1, "venue": "H"},
+        {"gf": 0, "ga": 3, "venue": "A"}, {"gf": 2, "ga": 2, "venue": "H"},
+        {"gf": 1, "ga": 2, "venue": "A"}, {"gf": 0, "ga": 1, "venue": "H"}
+      ]},
+      "odds": {
+        "1x2": {"home": 1.40, "draw": 5.20, "away": 7.00},
+        "btts": {"yes": 1.75, "no": 2.05},
+        "totals": {"3.5": {"over": 1.95, "under": 1.85}}
+      }
+    },
+    {
+      "home": {"name": "Inter", "matches": [
+        {"gf": 2, "ga": 0, "venue": "H"}, {"gf": 1, "ga": 1, "venue": "A"},
+        {"gf": 3, "ga": 1, "venue": "H"}, {"gf": 1, "ga": 0, "venue": "A"},
+        {"gf": 2, "ga": 1, "venue": "H"}, {"gf": 0, "ga": 0, "venue": "A"}
+      ]},
+      "away": {"name": "Empoli", "matches": [
+        {"gf": 0, "ga": 1, "venue": "A"}, {"gf": 1, "ga": 1, "venue": "H"},
+        {"gf": 0, "ga": 2, "venue": "A"}, {"gf": 1, "ga": 1, "venue": "H"},
+        {"gf": 0, "ga": 1, "venue": "A"}, {"gf": 2, "ga": 2, "venue": "H"}
+      ]},
+      "odds": {
+        "1x2": {"home": 1.72, "draw": 3.60, "away": 5.00},
+        "btts": {"yes": 2.10, "no": 1.70},
+        "totals": {"2.5": {"over": 2.00, "under": 1.80}}
+      }
+    }
+  ]
+}

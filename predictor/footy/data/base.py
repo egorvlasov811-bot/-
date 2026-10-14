@@ -31,8 +31,8 @@ def team_from_dict(d: dict) -> TeamForm:
     return TeamForm(name=d["name"], matches=matches)
 
 
-def load_match_file(path: str):
-    """Читает JSON с описанием матча.
+def match_from_dict(data: dict):
+    """Разбирает словарь с описанием матча в (home, away, league, ctx, odds).
 
     Структура:
     {
@@ -42,11 +42,7 @@ def load_match_file(path: str):
       "away": {"name": "...", "matches": [...]},
       "odds": { ... }   // опционально
     }
-    Возвращает (home, away, league, ctx, odds).
     """
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
     lg = data.get("league", {})
     league = LeagueContext(
         home_goals=float(lg.get("home_goals", 1.50)),
@@ -69,3 +65,30 @@ def load_match_file(path: str):
     away = team_from_dict(data["away"])
     odds = data.get("odds")
     return home, away, league, ctx, odds
+
+
+def load_match_file(path: str):
+    """Читает JSON с описанием матча. См. match_from_dict.
+
+    Возвращает (home, away, league, ctx, odds).
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return match_from_dict(data)
+
+
+def load_slate_file(path: str):
+    """Читает JSON-слейт (список матчей) для сборки экспрессов.
+
+    Поддерживает и список матчей, и {"matches": [...]}. Каждый элемент —
+    структура match_from_dict. Возвращает список (label, home, away,
+    league, ctx, odds), где label = "Home — Away".
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    items = data.get("matches", data) if isinstance(data, dict) else data
+    out = []
+    for d in items:
+        home, away, league, ctx, odds = match_from_dict(d)
+        out.append((f"{home.name} — {away.name}", home, away, league, ctx, odds))
+    return out

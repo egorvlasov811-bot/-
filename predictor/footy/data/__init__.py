@@ -1,9 +1,10 @@
 """Слой данных: загрузка форм команд из JSON или через API-провайдеров."""
 
-from .base import DataProvider, load_match_file, team_from_dict
+from .base import (DataProvider, load_match_file, load_slate_file,
+                   match_from_dict, team_from_dict)
 
-__all__ = ["DataProvider", "load_match_file", "team_from_dict",
-           "get_provider"]
+__all__ = ["DataProvider", "load_match_file", "load_slate_file",
+           "match_from_dict", "team_from_dict", "get_provider"]
 
 
 def get_provider(name: str, **kwargs):
