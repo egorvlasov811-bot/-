@@ -19,7 +19,13 @@ class DataProvider(Protocol):
 def team_from_dict(d: dict) -> TeamForm:
     """{'name': 'Real Madrid', 'matches': [{'gf':3,'ga':1,'venue':'H'}, ...]}"""
     matches = [
-        MatchResult(gf=int(m["gf"]), ga=int(m["ga"]), venue=m.get("venue", "H").upper())
+        MatchResult(
+            gf=int(m["gf"]),
+            ga=int(m["ga"]),
+            venue=m.get("venue", "H").upper(),
+            xg_for=(float(m["xgf"]) if m.get("xgf") is not None else None),
+            xg_against=(float(m["xga"]) if m.get("xga") is not None else None),
+        )
         for m in d.get("matches", [])
     ]
     return TeamForm(name=d["name"], matches=matches)
@@ -53,6 +59,7 @@ def load_match_file(path: str):
         shrink_k=float(c.get("shrink_k", 3.0)),
         rho=float(c.get("rho", -0.08)),
         max_goals=int(c.get("max_goals", 10)),
+        use_xg=bool(c.get("use_xg", True)),
         home_mult=float(c.get("home_mult", 1.0)),
         away_mult=float(c.get("away_mult", 1.0)),
         notes=list(c.get("notes", [])),

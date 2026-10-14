@@ -65,6 +65,38 @@ class FootballDataProvider:
                 return t["id"]
         raise LookupError(f"Команда '{name}' не найдена в турнире {competition}")
 
+    def competition_matches(
+        self,
+        competition: str = "CL",
+        matchday: Optional[int] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> List[dict]:
+        """Список матчей турнира: тур (matchday) или диапазон дат (YYYY-MM-DD).
+
+        Возвращает упрощённые записи: {'home','away','utcDate','id','status'}.
+        """
+        params: dict = {}
+        if matchday is not None:
+            params["matchday"] = matchday
+        if date_from:
+            params["dateFrom"] = date_from
+        if date_to:
+            params["dateTo"] = date_to
+        data = self._get(f"/competitions/{competition}/matches", params=params)
+        out = []
+        for m in data.get("matches", []):
+            out.append({
+                "home": (m.get("homeTeam", {}) or {}).get("name", ""),
+                "away": (m.get("awayTeam", {}) or {}).get("name", ""),
+                "home_id": (m.get("homeTeam", {}) or {}).get("id"),
+                "away_id": (m.get("awayTeam", {}) or {}).get("id"),
+                "utcDate": m.get("utcDate", ""),
+                "id": m.get("id"),
+                "status": m.get("status", ""),
+            })
+        return out
+
     def team_form(self, team: str, last: int = 8, competition: str = "CL") -> TeamForm:
         """Последние сыгранные матчи команды -> TeamForm."""
         team_id = team if isinstance(team, int) else self.resolve_team(team, competition)

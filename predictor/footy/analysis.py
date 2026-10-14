@@ -18,11 +18,18 @@ from . import markets, poisson, value
 
 @dataclass
 class MatchResult:
-    """Один сыгранный матч команды (для оценки формы)."""
+    """Один сыгранный матч команды (для оценки формы).
 
-    gf: int            # голов забито
-    ga: int            # голов пропущено
-    venue: str         # 'H' дома, 'A' в гостях
+    xg_for / xg_against — ожидаемые голы (xG), если доступны. Они точнее
+    отражают силу команды, чем фактические голы (меньше «шума» от реализации),
+    поэтому при наличии модель использует именно их.
+    """
+
+    gf: int                          # голов забито
+    ga: int                          # голов пропущено
+    venue: str                       # 'H' дома, 'A' в гостях
+    xg_for: Optional[float] = None   # xG забито (если известно)
+    xg_against: Optional[float] = None  # xG пропущено (если известно)
 
 
 @dataclass
@@ -49,6 +56,7 @@ class MatchContext:
     shrink_k: float = 3.0      # сила регрессии к среднему (псевдо-наблюдения)
     rho: float = -0.08         # параметр Диксона–Коулза
     max_goals: int = 10
+    use_xg: bool = True        # использовать xG вместо голов, если он есть
     # ручные множители к ожидаемым голам (травмы, усталость, мотивация):
     home_mult: float = 1.0
     away_mult: float = 1.0
@@ -59,17 +67,21 @@ def _weighted_rates(
     matches: List[MatchResult],
     venue: str,
     decay: float,
+    use_xg: bool = True,
 ) -> Tuple[float, float, float]:
     """Взвешенные средние (забито, пропущено) и суммарный вес выборки.
 
     Матчи нужного venue берутся с полным весом, противоположного — с
     половинным (информативны, но меньше). Свежесть — вес decay^возраст.
+    При use_xg и наличии xG в матче берётся xG вместо фактических голов.
     """
     num_gf = num_ga = wsum = 0.0
     for age, m in enumerate(matches):
         w = (decay ** age) * (1.0 if m.venue == venue else 0.5)
-        num_gf += w * m.gf
-        num_ga += w * m.ga
+        gf = m.xg_for if (use_xg and m.xg_for is not None) else m.gf
+        ga = m.xg_against if (use_xg and m.xg_against is not None) else m.ga
+        num_gf += w * gf
+        num_ga += w * ga
         wsum += w
     if wsum <= 0:
         return 0.0, 0.0, 0.0
@@ -79,6 +91,19 @@ def _weighted_rates(
 def _shrink(raw_strength: float, weight: float, k: float) -> float:
     """Регрессия силы к 1.0 (средней по лиге) при малой выборке."""
     return (weight * raw_strength + k * 1.0) / (weight + k)
+
+
+def injury_multiplier(n_out: int, per_player: float = 0.03,
+                      cap: float = 0.15) -> float:
+    """Множитель к атаке команды из-за недоступных игроков.
+
+    Грубая, но честная эвристика: каждый отсутствующий снижает атаку на
+    per_player (3%), суммарно не более cap (15%). Данные о травмах не говорят,
+    насколько важен игрок, поэтому держим поправку скромной и настраиваемой.
+    Возвращает множитель в диапазоне [1 - cap, 1.0].
+    """
+    reduction = min(cap, max(0, n_out) * per_player)
+    return 1.0 - reduction
 
 
 @dataclass
@@ -95,7 +120,7 @@ def estimate_strengths(
     ctx: MatchContext,
 ) -> TeamStrength:
     """Сила атаки/обороны команды относительно средней по лиге (≈1.0)."""
-    gf, ga, wsum = _weighted_rates(team.matches, venue, ctx.decay)
+    gf, ga, wsum = _weighted_rates(team.matches, venue, ctx.decay, ctx.use_xg)
     if venue == "H":
         att_base, def_base = league.home_goals, league.away_goals
     else:

@@ -89,6 +89,46 @@ def render(report: MatchReport, bankroll: float | None = None) -> str:
     return "\n".join(lines)
 
 
+def render_backtest(res) -> str:
+    """Текстовый отчёт по результату бэктеста."""
+    lines: List[str] = []
+    add = lines.append
+    add("=" * 62)
+    add("  БЭКТЕСТ СТРАТЕГИИ НА ИСТОРИИ")
+    add("=" * 62)
+    add(f"Матчей просмотрено:        {res.matches_seen}")
+    add(f"Пропущено (мало истории):  {res.skipped_no_history}")
+    add(f"Сделано ставок:            {res.bets}")
+    if res.bets == 0:
+        add("")
+        add("Ставок не было: по заданному порогу EV value не нашлось.")
+        add("Попробуй снизить --min-ev или увеличить выборку истории.")
+        return "\n".join(lines)
+    add(f"Оборот (сумма ставок):     {res.staked:.2f}")
+    add(f"Прибыль:                   {res.profit:+.2f}")
+    add(f"ROI (yield):               {res.roi * 100:+.2f}%")
+    add(f"Доля зашедших:             {res.hit_rate * 100:.1f}%")
+    if res.final_bankroll is not None:
+        add(f"Банк (старт→финиш):        → {res.final_bankroll:.2f}")
+    add("")
+    add("Разбивка по рынкам:")
+    add(f"  {'Рынок':<16}{'Ставок':>8}{'Оборот':>10}{'Прибыль':>10}{'ROI':>8}")
+    for market, m in sorted(res.by_market.items()):
+        roi = (m["profit"] / m["staked"] * 100) if m["staked"] > 0 else 0.0
+        add(f"  {market:<16}{int(m['bets']):>8}{m['staked']:>10.1f}"
+            f"{m['profit']:>+10.2f}{roi:>+7.1f}%")
+    add("")
+    if res.profit > 0 and res.roi > 0.02:
+        add("ВЕРДИКТ: стратегия была в плюсе на этой выборке. Но прошлое не "
+            "гарантирует будущего — проверь на большем периоде и помни про "
+            "комиссию/маржу и изменение линий.")
+    else:
+        add("ВЕРДИКТ: на этой выборке стратегия не в плюсе. Это нормальный и "
+            "честный результат — значит, по этим данным и порогу EV играть не "
+            "стоит. Крути параметры (min-ev, окно формы) и источник данных.")
+    return "\n".join(lines)
+
+
 def _verdict(bets: List[ValueBet], bankroll: float | None) -> str:
     best = bets[0]
     out = [

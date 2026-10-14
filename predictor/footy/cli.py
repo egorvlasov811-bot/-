@@ -15,8 +15,10 @@ import os
 import sys
 from typing import Optional
 
+from . import backtest as bt
 from . import report
-from .analysis import LeagueContext, MatchContext, analyze
+from . import round_analyzer as ra
+from .analysis import LeagueContext, MatchContext, analyze, injury_multiplier
 from .data import get_provider, load_match_file
 from .examples_data import demo_match
 
@@ -78,18 +80,35 @@ def cmd_predict(args: argparse.Namespace) -> int:
     return 0
 
 
+def _team_form(provider, team, last, with_xg):
+    """Форма команды с опциональным xG (если провайдер умеет)."""
+    try:
+        return provider.team_form(team, last=last, with_xg=with_xg)
+    except TypeError:
+        return provider.team_form(team, last=last)
+
+
 def cmd_fetch(args: argparse.Namespace) -> int:
     _load_dotenv()
     kwargs = {}
     if args.season:
         kwargs["season"] = args.season
     provider = get_provider(args.provider, **kwargs)
-    home_form = provider.team_form(args.home, last=args.last)
-    away_form = provider.team_form(args.away, last=args.last)
+    home_form = _team_form(provider, args.home, args.last, args.with_xg)
+    away_form = _team_form(provider, args.away, args.last, args.with_xg)
     home_form.name, away_form.name = args.home, args.away
 
+    home_mult, away_mult = args.home_mult, args.away_mult
+    notes = []
+    if args.injuries and hasattr(provider, "injuries"):
+        h_inj = provider.injuries(args.home)
+        a_inj = provider.injuries(args.away)
+        home_mult *= injury_multiplier(len(h_inj))
+        away_mult *= injury_multiplier(len(a_inj))
+        notes.append(f"Травмы: {args.home} — {len(h_inj)}, {args.away} — {len(a_inj)}")
+
     league = LeagueContext(home_goals=args.league_home, away_goals=args.league_away)
-    ctx = MatchContext(home_mult=args.home_mult, away_mult=args.away_mult)
+    ctx = MatchContext(home_mult=home_mult, away_mult=away_mult, notes=notes)
 
     odds = None
     if args.odds:
@@ -97,7 +116,71 @@ def cmd_fetch(args: argparse.Namespace) -> int:
             odds = json.load(f)
 
     rep = analyze(home_form, away_form, league, ctx, odds)
+    if notes and not args.json:
+        print("; ".join(notes))
     _emit(rep, args.json, args.bankroll)
+    return 0
+
+
+def cmd_backtest(args: argparse.Namespace) -> int:
+    if args.input.lower().endswith(".json"):
+        matches = bt.load_json_history(args.input)
+    else:
+        matches = bt.load_footballdata_csv(args.input)
+    ctx = MatchContext(use_xg=False)
+    res = bt.run_backtest(
+        matches,
+        min_ev=args.min_ev,
+        min_matches=args.min_matches,
+        form_window=args.form_window,
+        ctx=ctx,
+        stake=args.stake,
+        bankroll=args.bankroll or 1000.0,
+        kelly_frac=args.kelly_frac,
+    )
+    if args.json:
+        print(json.dumps({
+            "matches_seen": res.matches_seen, "bets": res.bets,
+            "staked": round(res.staked, 2), "profit": round(res.profit, 2),
+            "roi": round(res.roi, 4), "hit_rate": round(res.hit_rate, 4),
+            "final_bankroll": res.final_bankroll,
+            "by_market": {k: {kk: round(vv, 3) for kk, vv in v.items()}
+                          for k, v in res.by_market.items()},
+        }, ensure_ascii=False, indent=2))
+    else:
+        print(report.render_backtest(res))
+    return 0
+
+
+def cmd_round(args: argparse.Namespace) -> int:
+    _load_dotenv()
+    kwargs = {}
+    if args.season:
+        kwargs["season"] = args.season
+    provider = get_provider(args.provider, **kwargs)
+    fixtures = provider.competition_matches(
+        competition=args.competition,
+        matchday=args.matchday,
+        date_from=args.date_from,
+        date_to=args.date_to,
+    )
+    if args.status:
+        fixtures = [f for f in fixtures if f.get("status") in args.status.split(",")]
+
+    odds_map = None
+    if args.odds:
+        with open(args.odds, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        odds_map = {ra._odds_key(*k.split(" vs ")): v for k, v in raw.items()} \
+            if raw and " vs " in next(iter(raw)) else \
+            {ra._odds_key(*k.split("|")): v for k, v in raw.items()}
+
+    league = LeagueContext(home_goals=args.league_home, away_goals=args.league_away)
+    ctx = MatchContext()
+    result = ra.analyze_round(provider, fixtures, league=league, ctx=ctx,
+                              last=args.last, odds_map=odds_map,
+                              competition=args.competition)
+    print(ra.render_round(result, top=args.top, bankroll=args.bankroll))
     return 0
 
 
@@ -132,7 +215,44 @@ def build_parser() -> argparse.ArgumentParser:
                     help="ручная поправка к голам хозяев (травмы/мотивация)")
     sp.add_argument("--away-mult", type=float, default=1.0,
                     help="ручная поправка к голам гостей")
+    sp.add_argument("--with-xg", action="store_true",
+                    help="подтянуть xG по каждому матчу (API-Football, ест лимит)")
+    sp.add_argument("--injuries", action="store_true",
+                    help="учесть травмы автоматически (API-Football)")
     sp.set_defaults(func=cmd_fetch)
+
+    # ---- backtest ----
+    sp = sub.add_parser("backtest", help="проверить стратегию на исторических данных")
+    sp.add_argument("input", help="CSV (football-data.co.uk) или JSON с историей")
+    sp.add_argument("--min-ev", type=float, default=0.03,
+                    help="порог матожидания для ставки (0.03 = +3%)")
+    sp.add_argument("--min-matches", type=int, default=4,
+                    help="минимум матчей истории у команды для прогноза")
+    sp.add_argument("--form-window", type=int, default=10,
+                    help="сколько последних матчей держать в форме")
+    sp.add_argument("--stake", choices=["flat", "kelly"], default="flat",
+                    help="режим ставок: фикс 1 ед. или дробный Келли")
+    sp.add_argument("--kelly-frac", type=float, default=0.25,
+                    help="доля Келли (0.25 = четверть)")
+    sp.set_defaults(func=cmd_backtest)
+
+    # ---- round ----
+    sp = sub.add_parser("round", help="разбор целого тура ЛЧ + топ value-ставок")
+    sp.add_argument("--matchday", type=int, default=None, help="номер тура")
+    sp.add_argument("--date-from", default=None, help="дата с (YYYY-MM-DD)")
+    sp.add_argument("--date-to", default=None, help="дата по (YYYY-MM-DD)")
+    sp.add_argument("--competition", default="CL", help="код турнира (CL = ЛЧ)")
+    sp.add_argument("--provider", default="football-data")
+    sp.add_argument("--season", type=int, default=None)
+    sp.add_argument("--last", type=int, default=8)
+    sp.add_argument("--status", default=None,
+                    help="фильтр статуса, напр. SCHEDULED,TIMED")
+    sp.add_argument("--odds", default=None,
+                    help="JSON коэффициентов по матчам (ключ 'Home vs Away')")
+    sp.add_argument("--top", type=int, default=10, help="сколько топ value показать")
+    sp.add_argument("--league-home", type=float, default=1.50)
+    sp.add_argument("--league-away", type=float, default=1.15)
+    sp.set_defaults(func=cmd_round)
     return p
 
 

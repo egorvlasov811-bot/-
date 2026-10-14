@@ -1,0 +1,11 @@
+{
+  "Real Madrid vs Man City": {
+    "1x2": { "home": 2.05, "draw": 3.70, "away": 3.40 },
+    "btts": { "yes": 1.66, "no": 2.15 },
+    "totals": { "2.5": { "over": 1.72, "under": 2.08 } }
+  },
+  "Bayern vs PSG": {
+    "1x2": { "home": 1.85, "draw": 3.90, "away": 3.90 },
+    "btts": { "yes": 1.55, "no": 2.40 }
+  }
+}
