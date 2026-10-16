@@ -141,6 +141,7 @@ async function loadMatch(id) {
       <div class="lbl"><span>П1</span><span>${d.basis === "market" ? "итог: линия + модель" : "модель (линии нет)"}</span><span>П2</span></div>
       ${bar(d["1x2"])}
       ${d.basis === "market" ? `<div class="lbl"><span>чистая модель (второе мнение)</span></div>${bar(d.model_1x2, "mkt")}` : ""}
+      ${d.elo_1x2 ? `<div class="lbl"><span>ClubElo ${Math.round(d.elo_1x2.elo[0])}–${Math.round(d.elo_1x2.elo[1])} (второе мнение, проверяется журналом)</span></div>${bar(d.elo_1x2, "mkt")}` : ""}
       <div class="grid">
         <div class="stat"><div class="k">Тотал больше 1.5</div><div class="v">${pct(t["1.5"].over)}</div></div>
         <div class="stat"><div class="k">Тотал больше 2.5</div><div class="v">${pct(t["2.5"].over)}</div></div>

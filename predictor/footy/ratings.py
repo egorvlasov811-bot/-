@@ -221,6 +221,28 @@ def newcomer_means(matches: Sequence, ref_date: str,
     return {t: p for t in now - prev}
 
 
+def mix_books(goals: "RatingBook", xg: Optional["RatingBook"],
+              xg_weight: float, match=None) -> "RatingBook":
+    """Рейтинг-смесь: atk/def = голы^(1−w) · xG^w (геометрически) по командам,
+    найденным в обеих книгах (имена сопоставляются через match(name, names))."""
+    if xg is None or not xg.teams or xg_weight <= 0:
+        return goals
+    if match is None:
+        from .teams import best_match as match
+    out = RatingBook(teams={}, mu=goals.mu, home_adv=goals.home_adv)
+    w = xg_weight
+    for name, r in goals.teams.items():
+        hit = name if name in xg.teams else match(name, xg.teams)
+        if hit:
+            x = xg.teams[hit]
+            out.teams[name] = TeamRating(attack=r.attack ** (1 - w) * x.attack ** w,
+                                         defense=r.defense ** (1 - w) * x.defense ** w,
+                                         games=r.games)
+        else:
+            out.teams[name] = r
+    return out
+
+
 def active_teams(matches: Sequence, days: float = 150.0) -> set:
     """Команды, игравшие за последние `days` дней истории (текущий состав лиги)."""
     if not matches:

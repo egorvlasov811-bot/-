@@ -174,11 +174,44 @@ class FootyService:
         for csv in euro.COUNTRY_TO_CSV.values():
             book = self.rating_book(csv)
             if book is not None:
-                domestic[csv] = book
+                # xG во внутреннем рейтинге: на 414 матчах ЛЧ 0.9129 -> 0.9101
+                domestic[csv] = rt.mix_books(book, self.xg_book(csv), XG_WEIGHT)
         model = euro.EuroModel(matches, country, domestic,
                                ref_date=self.today().isoformat())
         self.cache.put(key, model)
         return model
+
+    def clubelo(self):
+        from .data.clubelo import ClubElo
+        if not hasattr(self, "_clubelo"):
+            def offline(url):
+                raise RuntimeError("offline")
+            self._clubelo = ClubElo(self.hist_dir, **({} if self.auto_download
+                                                      else {"get": offline}))
+        return self._clubelo
+
+    def _elo_1x2(self, code: str, home: str, away: str, total: float,
+                 euro_model=None) -> Optional[dict]:
+        """Второе мнение ClubElo (в итог не входит — проверяется журналом)."""
+        from .data import clubelo
+        try:
+            ce = self.clubelo()
+            def cc(name):
+                if euro_model is None:
+                    return clubelo.LEAGUE_CODES.get(code)
+                ctry = euro_model.country.get(name)
+                if ctry is None:
+                    hit = teams.best_match(name, euro_model.country)
+                    ctry = euro_model.country.get(hit) if hit else None
+                return clubelo.COUNTRY_CODES.get(ctry or "")
+            eh, ea = ce.elo(home, cc(home)), ce.elo(away, cc(away))
+            if eh is None or ea is None:
+                return None
+            p = clubelo.probs_1x2(eh, ea, total)
+            return {"home": round(p["home"], 4), "draw": round(p["draw"], 4),
+                    "away": round(p["away"], 4), "elo": [eh, ea]}
+        except Exception:
+            return None
 
     def injuries(self):
         from .data.fpl import FplInjuries
@@ -385,6 +418,10 @@ class FootyService:
         })
         if p1x2:
             d["market_1x2"] = {k: round(v, 4) for k, v in p1x2.items()}
+        elo = self._elo_1x2(lg.code, home, away, rep.lam_home + rep.lam_away,
+                            euro_model)
+        if elo:
+            d["elo_1x2"] = elo
         d["verdict"] = _verdict(d)
         self.cache.put(key, d)
         return d
@@ -450,6 +487,10 @@ def format_text(d: dict) -> str:
         m = d["model_1x2"]
         lines.append(f"<i>модель: {_pct(m['home'])} · {_pct(m['draw'])} · "
                      f"{_pct(m['away'])}</i>")
+    if d.get("elo_1x2"):
+        e = d["elo_1x2"]
+        lines.append(f"<i>ClubElo {e['elo'][0]:.0f}–{e['elo'][1]:.0f}: {_pct(e['home'])} · "
+                     f"{_pct(e['draw'])} · {_pct(e['away'])}</i>")
     t = d["totals"]
     lines.append(f"ТБ1.5 {_pct(t['1.5']['over'])} · ТБ2.5 {_pct(t['2.5']['over'])} · "
                  f"ТБ3.5 {_pct(t['3.5']['over'])}")

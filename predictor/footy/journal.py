@@ -55,6 +55,10 @@ def connect(path: str = DEFAULT_DB) -> sqlite3.Connection:
     db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
+    cols = {r[1] for r in db.execute("PRAGMA table_info(snapshots)")}
+    for c in ("e_home", "e_draw", "e_away"):  # ClubElo (добавлено позже)
+        if c not in cols:
+            db.execute(f"ALTER TABLE snapshots ADD COLUMN {c} REAL")
     return db
 
 
@@ -118,6 +122,10 @@ def _save_snapshot(db, d: dict, f, now: datetime) -> None:
          d["totals"]["2.5"]["over"], d["lambda"]["home"], d["lambda"]["away"],
          *(f1 or (None, None, None)), fo[0] if fo else None,
          d.get("sources", {}).get("books", 0)))
+    e = d.get("elo_1x2")
+    if e:
+        db.execute("UPDATE snapshots SET e_home=?, e_draw=?, e_away=? WHERE id=?",
+                   (e["home"], e["draw"], e["away"], cur.lastrowid))
     for b in d.get("value_bets", []):
         if b["ev"] > 0 and (b["market"] == "1X2" or b["market"] == "Тотал 2.5"):
             db.execute("INSERT INTO edges VALUES (?,?,?,?,?,?,?)",
@@ -228,11 +236,13 @@ def report(db: sqlite3.Connection) -> dict:
         "FROM snapshots s JOIN results r USING (fixture_id) "
         "WHERE r.hg IS NOT NULL AND s.id = (SELECT MIN(id) FROM snapshots s2 "
         "WHERE s2.fixture_id = s.fixture_id) ORDER BY s.kickoff").fetchall()
-    ll = {"final": [], "model": [], "line": [], "closing": []}
+    ll = {"final": [], "model": [], "elo": [], "line": [], "closing": []}
     for r in rows:
         o = "home" if r["hg"] > r["ag"] else ("draw" if r["hg"] == r["ag"] else "away")
         ll["final"].append(-math.log(max(r[f"p_{o}"], 1e-9)))
         ll["model"].append(-math.log(max(r[f"m_{o}"], 1e-9)))
+        if r["e_home"] is not None:
+            ll["elo"].append(-math.log(max(r[f"e_{o}"], 1e-9)))
         if r["f_home"] is not None:
             ll["line"].append(-math.log(max(r[f"f_{o}"], 1e-9)))
         if r["c_home"] is not None:
@@ -282,6 +292,7 @@ def render_report(rep: dict) -> str:
         lines += ["", "Точность 1X2 (log-loss, меньше — лучше):",
                   f"  итог (линия+модель) {f(ll['final'])}  [{n['final']}]",
                   f"  чистая модель       {f(ll['model'])}  [{n['model']}]",
+                  f"  ClubElo             {f(ll['elo'])}  [{n['elo']}]",
                   f"  линия на снимке     {f(ll['line'])}  [{n['line']}]",
                   f"  закрывающая линия   {f(ll['closing'])}  [{n['closing']}]"]
     roi = "—" if rep["edge_roi"] is None else f"{rep['edge_roi'] * 100:+.1f}%"

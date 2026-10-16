@@ -133,3 +133,12 @@ def test_newcomer_prior_makes_new_team_weaker():
     weak = rt.fit_ratings(ms, prior_games=5, normalize=True,
                           prior_means=rt.newcomer_means(ms, "2025-10-01"))
     assert weak.rating("N").attack < plain.rating("N").attack
+
+
+def test_mix_books_geometric():
+    g = rt.RatingBook(teams={"A": rt.TeamRating(1.44, 0.81), "B": rt.TeamRating(1.0, 1.0)})
+    x = rt.RatingBook(teams={"A FC": rt.TeamRating(1.0, 1.0)})
+    m = rt.mix_books(g, x, 0.5)
+    assert abs(m.teams["A"].attack - 1.2) < 1e-9 and abs(m.teams["A"].defense - 0.9) < 1e-9
+    assert m.teams["B"].attack == 1.0          # нет в xG — как было
+    assert rt.mix_books(g, None, 0.7) is g
