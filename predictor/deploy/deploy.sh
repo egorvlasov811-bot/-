@@ -43,7 +43,7 @@ ssh "$HOST" 'set -e
     fi
   done
   systemctl daemon-reload
-  systemctl enable -q --now footy-digest.timer
+  systemctl enable -q --now footy-digest.timer footy-alerts.timer
   sleep 2
   systemctl --no-pager --lines=0 status footy-bot footy-web | grep -E "●|Active"'
 echo "Готово. Веб: ssh -L 8050:127.0.0.1:8050 $HOST  ->  http://127.0.0.1:8050"

@@ -1,0 +1,9 @@
+[Unit]
+Description=footy: notifications 1 hour before matches (with analysis)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=footy
+WorkingDirectory=/opt/footy/app
+ExecStart=/opt/footy/venv/bin/python -m footy alerts

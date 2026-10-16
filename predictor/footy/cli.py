@@ -367,6 +367,56 @@ def cmd_tips(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_alerts(args: argparse.Namespace) -> int:
+    """Уведомления за час до матчей (запускается таймером каждые 10 минут)."""
+    _load_dotenv()
+    from . import alerts, journal
+    from .service import FootyService
+    db = journal.connect(args.db or journal.DEFAULT_DB)
+    ids = [int(x) for x in os.environ.get("TELEGRAM_ALLOWED_IDS", "")
+           .replace(" ", "").split(",") if x]
+    if args.dry_run or not ids:
+        out = []
+        send, ids = (lambda chat, text: out.append(text)), [0]
+    else:
+        from .tgbot import _http_api
+        api = _http_api(os.environ["TELEGRAM_BOT_TOKEN"])
+        send = lambda chat, text: api("sendMessage", {
+            "chat_id": chat, "text": text, "parse_mode": "HTML",
+            "disable_web_page_preview": True})
+        out = None
+    n = alerts.run(FootyService(), db, send, ids, alerts.comps_from_env(),
+                   reserve=int(os.environ.get("FOOTY_ODDS_RESERVE", 50)),
+                   tips_for=_tips_lookup())
+    if out is not None:
+        import re
+        for t in out:
+            print(re.sub(r"</?[bi]>", "", t).replace("&lt;", "<").replace("&gt;", ">")
+                  .replace("&amp;", "&"))
+    print(f"Уведомлений по матчам: {n}")
+    return 0
+
+
+def _tips_lookup():
+    """Проверенные каперы по матчу — без запросов линии (кредиты не тратит)."""
+    try:
+        from . import tipsters as tp
+        from . import teams as tmod
+        from .data.tipsources import BetBuddyRank
+        bbr = BetBuddyRank()
+        cfg = tp.load_config()
+        ts = {("bbr", h): t for h, t in bbr.tipsters().items()}
+        cands = tp.group(bbr.pending_picks(), ts, cfg)
+    except Exception:
+        return None
+
+    def lookup(d):
+        return [c for c in cands if c.sport == "football"
+                and tmod.similarity(c.home, d["home"]) >= 0.8
+                and tmod.similarity(c.away, d["away"]) >= 0.8]
+    return lookup
+
+
 def cmd_download(args: argparse.Namespace) -> int:
     from .data import history
     codes = [c for c in args.leagues.split(",") if c] if args.leagues else \
@@ -812,6 +862,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--config", default=None,
                     help="путь к конфигу фильтра (деф. tipsters_config.json)")
     sp.set_defaults(func=cmd_tips)
+
+    sp = sub.add_parser("alerts", parents=[common],
+                        help="уведомления за час до матчей с разбором (для таймера)")
+    sp.add_argument("--dry-run", action="store_true",
+                    help="только показать текст, не отправлять (матч всё равно "
+                         "помечается как разобранный)")
+    sp.add_argument("--db", default=None, help="путь к SQLite (деф. footy.db)")
+    sp.set_defaults(func=cmd_alerts)
 
     sp = sub.add_parser("download", parents=[common],
                         help="скачать историю лиг с football-data.co.uk в hist/")
