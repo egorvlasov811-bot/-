@@ -116,3 +116,14 @@ def test_live_events_are_dropped():
     p = oddsapi.OddsApiProvider(api_key="k", http=HttpClient(fetch=fake_fetch))
     evs = p.events("PL", now=datetime(2026, 10, 16, 12, tzinfo=timezone.utc))
     assert len(evs) == 1 and evs[0].commence.startswith("2099")
+
+
+def test_exchange_commission_applied():
+    ev = {"home_team": "A", "away_team": "B", "bookmakers": [
+        {"key": "betfair_ex_eu", "markets": [{"key": "h2h", "outcomes": [
+            {"name": "A", "price": 3.0}, {"name": "B", "price": 2.0}, {"name": "Draw", "price": 4.0}]}]},
+        {"key": "bookA", "markets": [{"key": "h2h", "outcomes": [
+            {"name": "A", "price": 2.95}, {"name": "B", "price": 2.1}, {"name": "Draw", "price": 3.8}]}]}]}
+    best = oddsapi._collect(ev, "best")
+    assert best["1x2"]["home"] == 2.95          # 3.0 на бирже = 2.90 после 5%
+    assert oddsapi.net_price("betfair_ex_eu", 3.0) == 2.9

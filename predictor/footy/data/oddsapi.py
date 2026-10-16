@@ -62,6 +62,17 @@ class EventOdds:
     per_book: dict = field(default_factory=dict)  # {контора: кэфы в формате движка}
 
 
+# биржи берут комиссию с выигрыша — их «сырой» кэф завышает выплату
+EXCHANGE_COMMISSION = {"betfair_ex_eu": 0.05, "betfair_ex_uk": 0.05,
+                       "betfair_ex_au": 0.05, "matchbook": 0.02, "smarkets": 0.02}
+
+
+def net_price(book: str, price: float) -> float:
+    """Кэф после комиссии биржи: 1 + (k − 1)·(1 − комиссия)."""
+    c = EXCHANGE_COMMISSION.get(book, 0.0)
+    return round(1 + (price - 1) * (1 - c), 3) if c else price
+
+
 def _collect(event: dict, mode: str) -> dict:
     """Сводит кэфы всех контор события в один словарь по способу mode."""
     home, away = event.get("home_team"), event.get("away_team")
@@ -74,6 +85,7 @@ def _collect(event: dict, mode: str) -> dict:
                 price = oc.get("price")
                 if not price or price <= 1.0:
                     continue
+                price = net_price(bm.get("key", ""), float(price))
                 if mk.get("key") == "h2h":
                     sel = {home: "home", away: "away", "Draw": "draw"}.get(oc.get("name"))
                     if sel:
