@@ -198,9 +198,13 @@ def results_text(db: sqlite3.Connection, day: str) -> Optional[str]:
     lines = ["<b>Итоги вчерашних ставок</b>"]
     pnl, n = 0.0, 0
     for r in alerts_:
-        ok = None if r["hg"] is None else settle(
-            ("ТБ " if r["sel"] == "over" else "ТМ ") + str(r["line"]) if r["market"] == "totals"
-            else {"home": "П1", "draw": "X", "away": "П2"}[r["sel"]], r["hg"], r["ag"])
+        if r["market"] == "totals":
+            lbl = ("ТБ " if r["sel"] == "over" else "ТМ ") + str(r["line"])
+        elif r["market"] == "btts":
+            lbl = "Обе забьют: да" if r["sel"] == "yes" else "Обе забьют: нет"
+        else:
+            lbl = {"home": "П1", "draw": "X", "away": "П2"}[r["sel"]]
+        ok = None if r["hg"] is None else settle(lbl, r["hg"], r["ag"])
         mark = "⏳" if ok is None else ("✅" if ok else "❌")
         score = "" if r["hg"] is None else f" ({r['hg']}:{r['ag']})"
         match = f"{r['home']} — {r['away']}" if r["home"] else ""

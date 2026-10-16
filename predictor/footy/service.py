@@ -255,6 +255,22 @@ class FootyService:
         self.cache.put(key, book or False)
         return book
 
+    def btts_odds(self, sport: str, event_id: str) -> dict:
+        """«Обе забьют» одного матча (1 кредит The Odds API, кэш 30 минут)."""
+        op = self.odds_provider
+        if op is None or not sport or not event_id:
+            return {}
+        key = ("btts", event_id)
+        hit = self.cache.get(key, 1800)
+        if hit is not None:
+            return hit
+        try:
+            out = op.event_market(sport, event_id, "btts")
+        except Exception:
+            out = {}
+        self.cache.put(key, out)
+        return out
+
     # ------------------------------------------------------------ кэфы
     def odds_map(self, competition: str, mode: str = "best") -> Dict[str, dict]:
         op = self.odds_provider
@@ -270,7 +286,8 @@ class FootyService:
             return {}
         out = {_odds_key(e.home, e.away): {"best": e.odds, "fair": e.fair,
                                             "avg": e.avg, "books": e.books,
-                                            "per_book": e.per_book}
+                                            "per_book": e.per_book,
+                                            "event_id": e.event_id, "sport": e.sport}
                for e in events if e.odds}
         self.cache.put(key, out)
         return out
@@ -285,9 +302,10 @@ class FootyService:
 
     def analyze(self, competition: str, home: str, away: str, *,
                 home_id: Optional[int] = None, away_id: Optional[int] = None,
-                kickoff: str = "", with_odds: bool = True) -> dict:
+                kickoff: str = "", with_odds: bool = True,
+                with_btts: bool = False) -> dict:
         lg = history.league(competition)
-        key = ("analysis", lg.code, home, away, with_odds)
+        key = ("analysis", lg.code, home, away, with_odds, with_btts)
         hit = self.cache.get(key, 1800)
         if hit is not None:
             return hit  # type: ignore[return-value]
@@ -399,6 +417,16 @@ class FootyService:
         d = report.report_to_dict(rep)
         d["model_1x2"] = {k: round(v, 4) for k, v in model_rep.one_x_two.items()}
         d["model_over25"] = round(model_rep.totals[2.5]["over"], 4)
+        d["model_btts"] = round(model_rep.btts["yes"], 4)
+        if with_btts and line and line.get("event_id"):
+            bt = self.btts_odds(line.get("sport", ""), line["event_id"])
+            if bt:
+                d["btts_odds"] = bt
+                fb = (bt.get("fair") or {}).get("btts") or {}
+                if fb.get("yes") and fb.get("no"):
+                    from .value import remove_margin
+                    pf = remove_margin({"yes": fb["yes"], "no": fb["no"]})
+                    d["btts"] = {"yes": round(pf["yes"], 4), "no": round(pf["no"], 4)}
         d["model_lambda"] = {"home": round(model_rep.lam_home, 3),
                              "away": round(model_rep.lam_away, 3)}
         d["basis"] = "market" if p1x2 else "model"
@@ -472,9 +500,11 @@ class FootyService:
             variants, considered = ex.build(analyses, **kw)
         return variants, considered, len(analyses)
 
-    def analyze_fixture(self, fx: Fixture, with_odds: bool = True) -> dict:
+    def analyze_fixture(self, fx: Fixture, with_odds: bool = True,
+                        with_btts: bool = False) -> dict:
         d = self.analyze(fx.competition, fx.home, fx.away, home_id=fx.home_id,
-                         away_id=fx.away_id, kickoff=fx.utc, with_odds=with_odds)
+                         away_id=fx.away_id, kickoff=fx.utc, with_odds=with_odds,
+                         with_btts=with_btts)
         d["fixture_id"] = fx.id
         return d
 
@@ -573,7 +603,14 @@ def format_text(d: dict) -> str:
     t = d["totals"]
     lines.append(f"ТБ1.5 {_pct(t['1.5']['over'])} · ТБ2.5 {_pct(t['2.5']['over'])} · "
                  f"ТБ3.5 {_pct(t['3.5']['over'])}")
-    lines.append(f"Обе забьют: {_pct(d['btts']['yes'])}")
+    bo = (d.get("btts_odds") or {}).get("best", {}).get("btts") or {}
+    if bo.get("yes"):
+        ev = d["btts"]["yes"] * bo["yes"] - 1
+        lines.append(f"Обе забьют: да {_pct(d['btts']['yes'])} @ {bo['yes']:.2f} "
+                     f"(EV {ev * 100:+.1f}%) · нет @ {bo.get('no', 0):.2f}"
+                     + (f" <i>(модель {_pct(d['model_btts'])})</i>" if d.get("model_btts") else ""))
+    else:
+        lines.append(f"Обе забьют: {_pct(d['btts']['yes'])}")
     cs = ", ".join(f"{s} ({_pct(pr)})" for s, pr in d["correct_scores"][:3])
     lines.append(f"Счёт: {cs}")
     for side in ("home", "away"):

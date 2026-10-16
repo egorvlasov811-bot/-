@@ -393,7 +393,8 @@ def cmd_alerts(args: argparse.Namespace) -> int:
         out = None
     n = alerts.run(FootyService(), db, send, ids, alerts.comps_from_env(),
                    reserve=int(os.environ.get("FOOTY_ODDS_RESERVE", 50)),
-                   tips_for=_tips_lookup())
+                   tips_for=_tips_lookup(),
+                   btts_reserve=int(os.environ.get("FOOTY_BTTS_RESERVE", 150)))
     if out is not None:
         import re
         for t in out:

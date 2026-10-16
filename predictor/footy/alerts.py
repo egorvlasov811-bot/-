@@ -7,8 +7,9 @@
   3. снимок в журнал (почти закрывающая линия — бесплатно, кэфы уже есть);
   4. сообщение всем из TELEGRAM_ALLOWED_IDS.
 
-Кредиты The Odds API: ~2 за «волну» матчей турнира. Если кредитов осталось
-меньше FOOTY_ODDS_RESERVE (деф. 50) — разбор без линии, только модель.
+Кредиты The Odds API: ~2 за «волну» матчей турнира + 1 за «обе забьют»
+каждого матча. «Обе забьют» отключается, если кредитов меньше
+FOOTY_BTTS_RESERVE (деф. 150); линия — если меньше FOOTY_ODDS_RESERVE (деф. 50).
 
 Правила разбора — формализация ручного анализа:
   * ставка рекомендуется, если лучший кэф выше честного (EV ≥ +1%) и
@@ -128,6 +129,17 @@ def _bets(d: dict) -> List[Bet]:
                        ex._dutch(*(avg.get(k) for k in ks)),
                        sum(model[k] for k in ks) if model else None,
                        sum(elo[k] for k in ks) if elo else None))
+    bo = d.get("btts_odds") or {}
+    fb = (bo.get("fair") or {}).get("btts") or {}
+    if fb.get("yes") and fb.get("no"):
+        from .value import remove_margin
+        pf = remove_margin({"yes": fb["yes"], "no": fb["no"]})
+        bb, ba = (bo.get("best") or {}).get("btts") or {}, (bo.get("avg") or {}).get("btts") or {}
+        mb = d.get("model_btts")
+        out.append(Bet("Обе забьют — да", pf["yes"], bb.get("yes"), ba.get("yes"), mb, None,
+                       ("btts", "yes")))
+        out.append(Bet("Обе забьют — нет", pf["no"], bb.get("no"), ba.get("no"),
+                       None if mb is None else 1 - mb, None, ("btts", "no")))
     tb = (d.get("odds") or {}).get("totals") or {}
     ta = (d.get("avg_odds") or {}).get("totals") or {}
     mo = d.get("model_over25")
@@ -209,19 +221,24 @@ def render_view(v: MatchView, tips: Sequence = ()) -> str:
     fair, overs = market_probs(d.get("fair_odds") or {})
     m, e = d.get("model_1x2") or {}, d.get("elo_1x2") or {}
     if fair:
+        bty = next((b for b in v.bets if b.key == ("btts", "yes")), None)
         lines.append(f"Линия: П1 {_pct(fair['home'])} · X {_pct(fair['draw'])} · "
                      f"П2 {_pct(fair['away'])}"
-                     + (f" | ТБ2.5 {_pct(overs[2.5])}" if 2.5 in overs else ""))
+                     + (f" | ТБ2.5 {_pct(overs[2.5])}" if 2.5 in overs else "")
+                     + (f" | ОЗ да {_pct(bty.prob)} @ {bty.best:.2f}" if bty and bty.best else ""))
     lines.append(f"Модель (рейтинг+xG): {_pct(m.get('home'))} · {_pct(m.get('draw'))} · "
                  f"{_pct(m.get('away'))}"
                  + (f" | ТБ2.5 {_pct(d.get('model_over25'))}" if d.get("model_over25") else "")
+                 + (f" | ОЗ {_pct(d.get('model_btts'))}" if d.get("model_btts") else "")
                  + (f" | Elo: {_pct(e.get('home'))} · {_pct(e.get('draw'))} · "
                     f"{_pct(e.get('away'))}" if e else ""))
     if v.picks:
         from .data.oddsapi import best_book
         for b, conf in v.picks:
             avg = f" (средний {b.avg:.2f})" if b.avg else ""
-            bb = best_book(d.get("book_odds") or {}, b.key[0], b.key[1],
+            books = (d.get("btts_odds") or {}).get("per_book") if b.key[:1] == ("btts",) \
+                else d.get("book_odds")
+            bb = best_book(books or {}, b.key[0], b.key[1],
                            b.key[2] if len(b.key) > 2 else None) if b.key else None
             where = f" в {_esc(bb[0])}" if bb else ""
             lines.append(f"✅ <b>{_esc(b.label)} @ {b.best:.2f}</b>{where}{avg} — шанс ≈{_pct(b.prob)}, "
@@ -271,23 +288,29 @@ def due_fixtures(service, competitions: Sequence[str], db: sqlite3.Connection,
 def run(service, db: sqlite3.Connection, send: Callable[[int, str], None],
         recipients: Sequence[int], competitions: Sequence[str] = DEFAULT_COMPS,
         now: Optional[datetime] = None, reserve: int = 50,
-        tips_for: Optional[Callable] = None) -> int:
+        tips_for: Optional[Callable] = None, btts_reserve: int = 150) -> int:
     """Отправляет уведомления; возвращает число разобранных матчей."""
     from . import journal
     now = now or datetime.now(timezone.utc)
     due = due_fixtures(service, competitions, db, now)
     if not due:
         return 0
-    with_odds = True
+    with_odds = with_btts = True
     op = getattr(service, "odds_provider", None)
     if op is not None and hasattr(op, "remaining"):
         left = op.remaining()
         if left is not None and left < reserve:
             with_odds = False
+        if left is not None and left < btts_reserve:
+            with_btts = False      # «обе забьют» — 1 кредит за матч, режем первым
     blocks = []
     for f in sorted(due, key=lambda f: f.utc):
         try:
-            d = service.analyze_fixture(f, with_odds=with_odds)
+            try:
+                d = service.analyze_fixture(f, with_odds=with_odds,
+                                            with_btts=with_odds and with_btts)
+            except TypeError:  # сервис без поддержки «обе забьют»
+                d = service.analyze_fixture(f, with_odds=with_odds)
         except Exception as e:
             print(f"{f.home} — {f.away}: {e}")
             continue
@@ -315,7 +338,7 @@ def run(service, db: sqlite3.Connection, send: Callable[[int, str], None],
         except Exception as e:
             print(f"journal: {e}")
         for b, conf in v.picks:
-            if b.best and b.key and b.key[0] in ("1x2", "totals"):
+            if b.best and b.key and b.key[0] in ("1x2", "totals", "btts"):
                 db.execute("INSERT INTO alert_picks VALUES (?,?,?,?,?,?,?,?,?)",
                            (f.id, now.isoformat(), b.label, b.key[0], b.key[1],
                             b.key[2] if len(b.key) > 2 else None, b.best, b.prob, conf))

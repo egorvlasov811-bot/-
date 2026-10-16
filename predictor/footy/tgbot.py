@@ -214,7 +214,7 @@ class Bot:
             return
         home, away, code = parsed
         self.send(chat, f"Считаю {home} — {away}…")
-        self.send(chat, format_text(self.service.analyze(code, home, away)))
+        self.send(chat, format_text(self.service.analyze(code, home, away, with_btts=True)))
 
     def on_callback(self, chat: int, data: str) -> None:
         parts = data.split(":")
@@ -240,7 +240,7 @@ class Bot:
             if f is None:
                 self.send(chat, "Матч уже не в списке ближайших.")
                 return
-            d = self.service.analyze_fixture(f)
+            d = self.service.analyze_fixture(f, with_btts=True)
             self.send(chat, format_text(d))
             try:  # ранний снимок для журнала и «движения линии» — бесплатно
                 from datetime import datetime, timezone

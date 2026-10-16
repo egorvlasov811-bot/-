@@ -438,6 +438,10 @@ def calibration(db: sqlite3.Connection) -> dict:
         if p["market"] == "1x2":
             won = _outcome(hg, ag) == p["sel"]
             cp = p[f"c_{p['sel']}"]
+        elif p["market"] == "btts":
+            yes = hg > 0 and ag > 0
+            won = yes if p["sel"] == "yes" else not yes
+            cp = None
         elif p["market"] == "totals":
             line = float(p["line"])
             won = (hg + ag > line) if p["sel"] == "over" else (hg + ag < line)

@@ -124,3 +124,36 @@ def test_morning_results_include_alert_picks(tmp_path):
     db.execute("INSERT OR REPLACE INTO results (fixture_id, competition, hg, ag) VALUES (7,'PD',2,1)")
     text = digest.results_text(db, NOW.astimezone(digest.MSK).date().isoformat())
     assert "🔔" in text and "✅" in text and "Depor" in text
+
+
+def test_btts_bet_and_credit_guard(tmp_path):
+    d = _d()
+    d["model_btts"] = 0.72
+    d["btts_odds"] = {"fair": {"btts": {"yes": 1.40, "no": 3.30}},
+                      "best": {"btts": {"yes": 1.48, "no": 3.1}},
+                      "avg": {"btts": {"yes": 1.40, "no": 3.0}},
+                      "per_book": {"x": {"btts": {"yes": 1.48, "no": 3.1}}}}
+    v = alerts.analyze_view(d)
+    yes = next(b for b in v.bets if b.key == ("btts", "yes"))
+    assert abs(yes.prob - (1 / 1.40) / (1 / 1.40 + 1 / 3.30)) < 1e-9
+    assert any(b.key == ("btts", "yes") for b, _ in v.picks)   # 0.70·1.48 > 1.01
+    assert "ОЗ да" in alerts.render_view(v) and "в x" in alerts.render_view(v)
+
+    class S(Svc):
+        def analyze_fixture(self, f, with_odds=True, with_btts=False):
+            self.calls.append((f.id, with_odds, with_btts))
+            return _d()
+    db = journal.connect(str(tmp_path / "g.db"))
+    s = S(left=120)
+    alerts.run(s, db, lambda c, t: None, [5], ["PD"], now=NOW)
+    assert s.calls == [(7, True, False)]       # < 150 кредитов — без «обе забьют»
+
+
+def test_collect_btts():
+    from footy.data import oddsapi
+    ev = {"home_team": "A", "away_team": "B", "bookmakers": [
+        {"key": "k1", "markets": [{"key": "btts", "outcomes": [
+            {"name": "Yes", "price": 1.4}, {"name": "No", "price": 3.0}]}]},
+        {"key": "k2", "markets": [{"key": "btts", "outcomes": [
+            {"name": "Yes", "price": 1.45}, {"name": "No", "price": 2.9}]}]}]}
+    assert oddsapi._collect(ev, "best")["btts"] == {"yes": 1.45, "no": 3.0}

@@ -60,6 +60,8 @@ class EventOdds:
     fair: dict = field(default_factory=dict)   # «честная» линия: Pinnacle или среднее
     avg: dict = field(default_factory=dict)    # средние кэфы (цена «обычной» конторы)
     per_book: dict = field(default_factory=dict)  # {контора: кэфы в формате движка}
+    event_id: str = ""
+    sport: str = ""
 
 
 # биржи берут комиссию с выигрыша — их «сырой» кэф завышает выплату
@@ -90,6 +92,10 @@ def _collect(event: dict, mode: str) -> dict:
                     sel = {home: "home", away: "away", "Draw": "draw"}.get(oc.get("name"))
                     if sel:
                         prices.setdefault(("1x2", sel), []).append(float(price))
+                elif mk.get("key") == "btts":
+                    side = (oc.get("name") or "").lower()
+                    if side in ("yes", "no"):
+                        prices.setdefault(("btts", side), []).append(price)
                 elif mk.get("key") == "totals" and oc.get("point") is not None:
                     side = (oc.get("name") or "").lower()
                     if side in ("over", "under"):
@@ -103,6 +109,8 @@ def _collect(event: dict, mode: str) -> dict:
         val = round(agg(xs), 3)
         if key[0] == "1x2":
             out.setdefault("1x2", {})[key[1]] = val
+        elif key[0] == "btts":
+            out.setdefault("btts", {})[key[1]] = val
         else:
             out.setdefault("totals", {}).setdefault(key[1], {})[key[2]] = val
     # двухисходный рынок (NHL с овертаймом) — отдельно как «ml»
@@ -111,6 +119,8 @@ def _collect(event: dict, mode: str) -> dict:
     # полупустые рынки (только одна сторона) бесполезны для value — убираем
     if "1x2" in out and len(out["1x2"]) < 3:
         del out["1x2"]
+    if "btts" in out and len(out["btts"]) < 2:
+        del out["btts"]
     if "totals" in out:
         out["totals"] = {k: v for k, v in out["totals"].items() if len(v) == 2}
         if not out["totals"]:
@@ -136,7 +146,7 @@ def _merge_fair(sharp: dict, avg: dict) -> dict:
     """Честная линия: Pinnacle, а рынки/линии, которых у него нет, — среднее
     по конторам (напр. у Pinnacle тотал 2.75, а у остальных 2.5)."""
     out = {}
-    for m in ("1x2", "ml"):
+    for m in ("1x2", "ml", "btts"):
         if sharp.get(m) or avg.get(m):
             out[m] = sharp.get(m) or avg.get(m)
     tot = dict(avg.get("totals") or {})
@@ -170,6 +180,24 @@ class OddsApiProvider:
             return int(r.headers.get("x-requests-remaining"))
         except Exception:
             return None
+
+    def event_market(self, sport: str, event_id: str, market: str = "btts") -> dict:
+        """Доп. рынок одного матча (напр. «обе забьют»): 1 кредит за матч.
+
+        Возвращает {'best','fair','avg','per_book'} в формате движка.
+        """
+        data = self.http.get_json(
+            f"{BASE_URL}/sports/{sport}/events/{event_id}/odds",
+            params={"apiKey": self.api_key, "regions": self.regions,
+                    "markets": market, "oddsFormat": "decimal"})
+        if not isinstance(data, dict) or not data.get("bookmakers"):
+            return {}
+        avg = _collect(data, "avg")
+        return {"best": _collect(data, "best"),
+                "fair": _merge_fair(_collect(data, "pinnacle"), avg) or avg,
+                "avg": avg,
+                "per_book": {bm["key"]: _collect(data, bm["key"])
+                             for bm in data["bookmakers"] if bm.get("key")}}
 
     def sports(self) -> list:
         """Активные виды спорта/турниры (бесплатный запрос, кредиты не тратит)."""
@@ -211,7 +239,8 @@ class OddsApiProvider:
                                  away=ev.get("away_team", ""),
                                  commence=ev.get("commence_time", ""),
                                  odds=odds, books=books, fair=fair, avg=avg,
-                                 per_book=per_book))
+                                 per_book=per_book, event_id=ev.get("id", ""),
+                                 sport=ev.get("sport_key", "")))
         out.sort(key=lambda e: e.commence)
         return out
 
