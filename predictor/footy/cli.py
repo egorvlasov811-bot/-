@@ -347,6 +347,26 @@ def cmd_digest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tips(args: argparse.Namespace) -> int:
+    _load_dotenv()
+    from . import tips_service as ts
+    from . import tipsters as tp
+    from .service import FootyService
+    cfg = tp.load_config(args.config) if args.config else tp.load_config()
+    cands, stats = ts.collect(FootyService(), cfg)
+    if args.json:
+        print(json.dumps([{
+            "sport": c.sport, "league": c.league, "start": c.start, "match": c.match,
+            "bet": c.label, "tipsters": [v.pick.tipster for v in c.voices],
+            "p_line": c.p_line, "p_est": round(c.p_est, 4), "best_price": c.best_price,
+            "ev": round(c.ev, 4) if c.ev is not None else None,
+            "confidence": c.confidence, "notes": c.notes} for c in cands],
+            ensure_ascii=False, indent=2))
+    else:
+        print(ts.render(cands, stats, cfg, html=False))
+    return 0
+
+
 def cmd_download(args: argparse.Namespace) -> int:
     from .data import history
     codes = [c for c in args.leagues.split(",") if c] if args.leagues else \
@@ -784,6 +804,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="только показать текст, не отправлять")
     sp.add_argument("--db", default=None, help="путь к SQLite (деф. footy.db)")
     sp.set_defaults(func=cmd_digest)
+
+    sp = sub.add_parser("tips", parents=[common],
+                        help="консенсус проверенных каперов, сверенный с линией")
+    sp.add_argument("--config", default=None,
+                    help="путь к конфигу фильтра (деф. tipsters_config.json)")
+    sp.set_defaults(func=cmd_tips)
 
     sp = sub.add_parser("download", parents=[common],
                         help="скачать историю лиг с football-data.co.uk в hist/")

@@ -170,6 +170,21 @@ def _strip_accents(s: str) -> str:
                    if not unicodedata.combining(c))
 
 
+_CYR = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
+                ["a", "b", "v", "g", "d", "e", "o", "zh", "z", "i", "y", "k", "l", "m",
+                 "n", "o", "p", "r", "s", "t", "u", "f", "kh", "ts", "ch", "sh", "sch",
+                 "", "y", "", "e", "yu", "ya"]))
+
+
+def translit(name: str) -> str:
+    """Кириллица -> латиница («Айнтрахт Франкфурт» -> «aintrakht frankfurt»),
+    чтобы сравнивать русские названия nb-bet с английскими из API."""
+    if not any("а" <= c.lower() <= "я" or c.lower() == "ё" for c in name or ""):
+        return name
+    return "".join(_CYR.get(c, c) if c.islower() else _CYR.get(c.lower(), c).capitalize()
+                   for c in name)
+
+
 def normalize(name: str) -> str:
     """Каноническая форма названия для сравнения."""
     s = _strip_accents(name or "").lower()

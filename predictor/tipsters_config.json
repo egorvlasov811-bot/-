@@ -1,0 +1,33 @@
+{
+  "_comment": "Фильтр каперов. Правь числа и перезапускай — код менять не нужно. Пояснения в footy/tipsters.py",
+  "sports": ["football", "hockey", "tennis"],
+  "bbr": {
+    "min_graded": 60,
+    "min_priced": 40,
+    "prior_roi": -0.035,
+    "shrink_k": 200,
+    "min_shrunk_roi": 0.0,
+    "min_edge_z": 1.0,
+    "min_avg_odds": 1.35,
+    "max_avg_odds": 3.5,
+    "max_deleted_share": 0.10,
+    "active_days": 14,
+    "recent_min_priced": 15,
+    "recent_min_roi": -0.15
+  },
+  "nb": {
+    "min_bets_30d": 40,
+    "min_roi_30d": 0.10,
+    "weight": 0.5
+  },
+  "consensus": {
+    "max_tipster_shift": 0.03,
+    "no_line_margin": 0.05,
+    "exclude_markets": ["team_total", "handicap_sets", "handicap_games", "total_sets", "total_games"]
+  },
+  "report": {
+    "max_candidates": 5,
+    "min_confidence": 45,
+    "min_ev": -0.01
+  }
+}

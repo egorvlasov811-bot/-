@@ -41,7 +41,7 @@ SPORT_KEYS = {
 def sport_key(competition: str) -> str:
     """Код турнира -> ключ The Odds API (ключ soccer_* пропускается как есть)."""
     c = (competition or "").strip()
-    if c.startswith("soccer_"):
+    if c.startswith(("soccer_", "icehockey_", "tennis_")):
         return c
     if c.upper() in SPORT_KEYS:
         return SPORT_KEYS[c.upper()]
@@ -92,6 +92,9 @@ def _collect(event: dict, mode: str) -> dict:
             out.setdefault("1x2", {})[key[1]] = val
         else:
             out.setdefault("totals", {}).setdefault(key[1], {})[key[2]] = val
+    # двухисходный рынок (теннис, NHL с овертаймом) — отдельно как «ml»
+    if "1x2" in out and set(out["1x2"]) == {"home", "away"}:
+        out["ml"] = out.pop("1x2")
     # полупустые рынки (только одна сторона) бесполезны для value — убираем
     if "1x2" in out and len(out["1x2"]) < 3:
         del out["1x2"]
@@ -119,7 +122,10 @@ def _robust_best(xs: List[float]) -> float:
 def _merge_fair(sharp: dict, avg: dict) -> dict:
     """Честная линия: Pinnacle, а рынки/линии, которых у него нет, — среднее
     по конторам (напр. у Pinnacle тотал 2.75, а у остальных 2.5)."""
-    out = {"1x2": sharp.get("1x2") or avg.get("1x2")} if (sharp.get("1x2") or avg.get("1x2")) else {}
+    out = {}
+    for m in ("1x2", "ml"):
+        if sharp.get(m) or avg.get(m):
+            out[m] = sharp.get(m) or avg.get(m)
     tot = dict(avg.get("totals") or {})
     tot.update(sharp.get("totals") or {})
     if tot:
@@ -142,6 +148,11 @@ class OddsApiProvider:
             http.ttl = float(os.environ.get("FOOTY_ODDS_CACHE_TTL", 600))
         self.http = http
 
+    def sports(self) -> list:
+        """Активные виды спорта/турниры (бесплатный запрос, кредиты не тратит)."""
+        data = self.http.get_json(f"{BASE_URL}/sports", params={"apiKey": self.api_key})
+        return [s for s in data if s.get("active")] if isinstance(data, list) else []
+
     def raw_events(self, competition: str, markets: str = "h2h,totals") -> list:
         data = self.http.get_json(
             f"{BASE_URL}/sports/{sport_key(competition)}/odds",
@@ -151,7 +162,7 @@ class OddsApiProvider:
         return data if isinstance(data, list) else []
 
     def events(self, competition: str, mode: str = "best",
-               now: Optional[datetime] = None) -> List[EventOdds]:
+               now: Optional[datetime] = None, markets: str = "h2h,totals") -> List[EventOdds]:
         """Ближайшие матчи турнира с кэфами, сведёнными по способу mode.
 
         Уже начавшиеся матчи отбрасываются: API отдаёт и live-кэфы, а в них
@@ -159,7 +170,7 @@ class OddsApiProvider:
         """
         now = now or datetime.now(timezone.utc)
         out = []
-        for ev in self.raw_events(competition):
+        for ev in self.raw_events(competition, markets):
             try:
                 ko = datetime.fromisoformat(ev.get("commence_time", "").replace("Z", "+00:00"))
             except ValueError:

@@ -66,7 +66,8 @@ def test_full_run_saves_and_reports_next_day(tmp_path):
             return d
 
     sent = []
-    text = digest.run(Svc(), db, lambda c, t: sent.append((c, t)), [7], competitions=["PL"])
+    text = digest.run(Svc(), db, lambda c, t: sent.append((c, t)), [7], competitions=["PL"],
+                      collect_tips=lambda svc: ([], {}))
     assert sent and all(c == 7 for c, _ in sent)
     assert "Ставки на сегодня" in text and "Экспресс" in text
     day = datetime.now(digest.MSK).date().isoformat()

@@ -29,6 +29,8 @@ HELP = ("⚽ <b>footy</b> — статистический разбор матч
         "/today — лучшие ставки и экспрессы на сегодня "
         "(сам присылаю каждое утро в 9:00 МСК).\n"
         "/express — экспрессы с максимальным шансом захода.\n"
+        "/tips — прогнозы проверенных каперов (футбол, хоккей, теннис), "
+        "сверенные с линией.\n"
         "/stats — журнал: точность прогнозов и CLV на реальных матчах.\n\n"
         "Модель даёт вероятности, а не гарантии. На истории букмекерская "
         "линия точнее модели — расхождения с ней это сигнал, а не верняк.")
@@ -152,6 +154,14 @@ class Bot:
             rep = journal.report(journal.connect())
             self.send(chat, "<pre>" + journal.render_report(rep)
                       .replace("&", "&amp;").replace("<", "&lt;") + "</pre>")
+            return
+        if text.startswith("/tips"):
+            from . import tips_service as ts
+            self.send(chat, "Собираю прогнозы каперов и сверяю с линией… (до минуты)")
+            cands, stats = ts.collect(self.service)
+            text = ts.render(cands, stats)
+            for i in range(0, len(text), 3900):  # лимит Telegram — 4096 символов
+                self.send(chat, text[i:i + 3900])
             return
         if text.startswith("/today"):
             from . import digest

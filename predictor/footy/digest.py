@@ -143,13 +143,18 @@ def settle(selection: str, hg: int, ag: int) -> Optional[bool]:
 
 
 def save(db: sqlite3.Connection, day: str, picks: List[Pick],
-         expresses: List[ex.Express]) -> None:
+         expresses: List[ex.Express], tips: Sequence = ()) -> None:
     db.executescript(SCHEMA)
     db.execute("DELETE FROM digest_items WHERE day=?", (day,))
     for p in picks:
         db.execute("INSERT INTO digest_items VALUES (?,?,?,?,?,?,?,?,?,?)",
                    (day, "pick", "", p.fixture_id, p.match, p.market, p.selection,
                     p.price, p.prob, None))
+    from .tips_service import refs
+    for c in tips:
+        db.execute("INSERT INTO digest_items VALUES (?,?,?,?,?,?,?,?,?,?)",
+                   (day, "tip", json.dumps(refs(c), ensure_ascii=False), None, c.match,
+                    c.market, c.label, c.best_price, c.p_est, None))
     for gi, e in enumerate(expresses):
         for l in e.legs:
             db.execute("INSERT INTO digest_items VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -178,6 +183,17 @@ def results_text(db: sqlite3.Connection, day: str) -> Optional[str]:
         lines.append(f"{mark} {_esc(r['match'])}{score}: {_esc(r['selection'])} @ {r['price']:.2f}")
         if ok is not None:
             pnl += (r["price"] - 1) if ok else -1
+            n += 1
+    from .tips_service import settle as settle_tip
+    for r in rows:
+        if r["kind"] != "tip":
+            continue
+        res = settle_tip(json.loads(r["title"]))
+        mark = {"win": "✅", "loss": "❌", "push": "↩️"}.get(res, "⏳")
+        lines.append(f"{mark} Каперы: {_esc(r['match'])}: {_esc(r['selection'])}"
+                     + (f" @ {r['price']:.2f}" if r["price"] else ""))
+        if res in ("win", "loss") and r["price"]:
+            pnl += (r["price"] - 1) if res == "win" else -1
             n += 1
     groups = {}
     for r in rows:
@@ -244,6 +260,32 @@ def today_text(picks: List[Pick], expresses: List[ex.Express], matches: int) -> 
     return "\n".join(lines)
 
 
+def _within_day(start: str, now: datetime, hours: float = 21.0) -> bool:
+    try:
+        ko = datetime.fromisoformat(start.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return now < ko <= now + timedelta(hours=hours)
+
+
+def tips_text(tips: Sequence) -> str:
+    from . import tipsters as tp
+    lines = ["<b>Каперы × линия: лучшие кандидаты на сегодня</b>"]
+    if not tips:
+        lines.append("Нет прогнозов проверенных каперов с ценой не ниже честной и "
+                     "достаточной уверенностью. Пропустить — тоже решение.")
+    for i, c in enumerate(tips, 1):
+        ev = f", EV {c.ev * 100:+.1f}%" if c.ev is not None else ""
+        price = f" @ {c.best_price:.2f}" if c.best_price else ""
+        who = ", ".join(v.pick.tipster for v in c.voices)
+        lines.append(f"{i}. {_ko(c.start)} {_esc(c.match)}: <b>{_esc(c.label)}</b>{price} — "
+                     f"шанс ≈{c.p_est * 100:.0f}%{ev}; каперы: {_esc(who)}; уверенность "
+                     f"{c.confidence}/100 ({tp.confidence_label(c.confidence)})")
+    lines.append("<i>Полный разбор — /tips. Каперы двигают оценку не больше чем на 3 п.п. "
+                 "от линии: их успех плохо повторяется.</i>")
+    return "\n".join(lines)
+
+
 def build_today(service, competitions: Sequence[str], hours: float = 21.0):
     """(лучшие события, экспрессы, число матчей) на ближайшие hours часов."""
     now = datetime.now(timezone.utc)
@@ -279,7 +321,7 @@ def build_today(service, competitions: Sequence[str], hours: float = 21.0):
 
 def run(service, db: sqlite3.Connection, send, recipients: Sequence[int],
         competitions: Sequence[str] = journal.DEFAULT_COMPS,
-        now: Optional[datetime] = None) -> str:
+        now: Optional[datetime] = None, collect_tips=None) -> str:
     """Полный утренний цикл; send(chat_id, text) отправляет сообщение."""
     now = now or datetime.now(timezone.utc)
     journal.record(service, db, competitions, window_hours=36)
@@ -290,11 +332,22 @@ def run(service, db: sqlite3.Connection, send, recipients: Sequence[int],
     if prev:
         parts.append(prev)
     picks, expresses, n = build_today(service, competitions)
+    tips = []
+    try:
+        from . import tips_service as ts
+        from . import tipsters as tp
+        cands, stats = (collect_tips or ts.collect)(service)
+        cfg = tp.load_config()
+        tips = [c for c in tp.best_candidates(cands, cfg)
+                if c.start and _within_day(c.start, now)]
+    except Exception as e:
+        print(f"tips: {e}")
     if n:
         parts.append(today_text(picks, expresses, n))
-        save(db, today.isoformat(), picks, expresses)
     else:
         parts.append("Сегодня в ЛЧ и топ-5 лигах матчей с линией нет.")
+    parts.append(tips_text(tips))
+    save(db, today.isoformat(), picks if n else [], expresses if n else [], tips)
     parts[0] = "☀️ Доброе утро!\n\n" + parts[0]
     for chat in recipients:
         for part in parts:  # отдельными сообщениями: лимит Telegram 4096 символов
