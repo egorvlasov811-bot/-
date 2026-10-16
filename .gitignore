@@ -5,3 +5,4 @@ __pycache__/
 venv/
 .footy_cache/
 .footy_profile.json
+hist/

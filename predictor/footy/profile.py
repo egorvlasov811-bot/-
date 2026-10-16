@@ -21,10 +21,11 @@ MODEL_DEFAULTS = {"rho": -0.08, "decay": 0.85, "shrink_k": 3.0}
 def save_profile(params: dict, path: str = DEFAULT_PATH) -> str:
     """Записывает профиль (rho/decay/shrink_k + метаданные) в JSON."""
     keep = {}
-    for k in ("rho", "decay", "shrink_k"):
+    for k in ("rho", "decay", "shrink_k", "half_life_days", "prior_games"):
         if k in params and params[k] is not None:
             keep[k] = float(params[k])
-    for meta in ("metric", "n", "log_loss", "brier"):
+    for meta in ("metric", "n", "log_loss", "brier", "model",
+                 "market_log_loss"):
         if params.get(meta) is not None:
             keep[meta] = params[meta]
     with open(path, "w", encoding="utf-8") as f:

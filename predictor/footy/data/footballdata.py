@@ -64,6 +64,17 @@ class FootballDataProvider:
             if target in t.get("name", "").lower():
                 self._team_cache[key] = t["id"]
                 return t["id"]
+        # нечёткий поиск: «Man Utd» -> «Manchester United FC»
+        from ..teams import best_match
+        by_name = {}
+        for t in teams:
+            for n in (t.get("name"), t.get("shortName")):
+                if n:
+                    by_name[n] = t["id"]
+        hit = best_match(name, by_name)
+        if hit:
+            self._team_cache[key] = by_name[hit]
+            return by_name[hit]
         raise LookupError(f"Команда '{name}' не найдена в турнире {competition}")
 
     def competition_matches(

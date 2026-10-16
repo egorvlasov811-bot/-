@@ -99,6 +99,11 @@ def render_backtest(res) -> str:
     add(f"Матчей просмотрено:        {res.matches_seen}")
     add(f"Пропущено (мало истории):  {res.skipped_no_history}")
     add(f"Сделано ставок:            {res.bets}")
+    if getattr(res, "ll_n", 0):
+        gap = res.model_logloss - res.market_logloss
+        add(f"Точность 1X2 (log-loss):   модель {res.model_logloss:.4f} | "
+            f"рынок {res.market_logloss:.4f} "
+            f"({'рынок точнее' if gap > 0 else 'модель точнее'} на {abs(gap):.4f})")
     if res.bets == 0:
         add("")
         add("Ставок не было: по заданному порогу EV value не нашлось.")
@@ -151,3 +156,26 @@ def _verdict(bets: List[ValueBet], bankroll: float | None) -> str:
     out.append("  Ставь только value с положительным EV и дроби банк — "
                "дисциплина важнее отдельного прогноза.")
     return "\n".join(out)
+
+
+def report_to_dict(r) -> dict:
+    """MatchReport -> словарь для JSON (CLI, веб, бот)."""
+    return {
+        "home": r.home_name, "away": r.away_name,
+        "lambda": {"home": round(r.lam_home, 3), "away": round(r.lam_away, 3)},
+        "1x2": {k: round(v, 4) for k, v in r.one_x_two.items()},
+        "double_chance": {k: round(v, 4) for k, v in r.double_chance.items()},
+        "btts": {k: round(v, 4) for k, v in r.btts.items()},
+        "totals": {str(ln): {k: round(v, 4) for k, v in t.items()}
+                   for ln, t in r.totals.items()},
+        "handicaps": {str(ln): {k: round(v, 4) for k, v in h.items()}
+                      for ln, h in r.handicaps.items()},
+        "correct_scores": [[s, round(p, 4)] for s, p in r.correct_scores],
+        "value_bets": [
+            {"market": b.market, "selection": b.selection,
+             "model_prob": round(b.model_prob, 4), "book_odds": b.book_odds,
+             "fair_odds": round(b.fair_odds, 3), "ev": round(b.ev, 4),
+             "edge": round(b.edge, 4), "kelly": round(b.kelly, 4)}
+            for b in r.value_bets
+        ],
+    }

@@ -16,5 +16,8 @@ def get_provider(name: str, **kwargs):
     if name in ("api-football", "apifootball", "af"):
         from .apifootball import ApiFootballProvider
         return ApiFootballProvider(**kwargs)
+    if name in ("odds-api", "oddsapi", "the-odds-api"):
+        from .oddsapi import OddsApiProvider
+        return OddsApiProvider(**kwargs)
     raise ValueError(f"Неизвестный провайдер: {name!r}. "
                      "Доступно: 'football-data', 'api-football'.")

@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from . import teams
 from .analysis import LeagueContext, MatchContext, MatchReport, analyze
 from .value import ValueBet
 
@@ -31,6 +32,18 @@ class RoundResult:
 
 def _odds_key(home: str, away: str) -> str:
     return f"{home.strip().lower()}|{away.strip().lower()}"
+
+
+def lookup_odds(odds_map: Dict[str, dict], home: str, away: str) -> Optional[dict]:
+    """Кэфы матча: точный ключ, иначе нечёткое сравнение названий команд
+    («Real Madrid CF» из football-data ↔ «Real Madrid» из The Odds API)."""
+    if not odds_map:
+        return None
+    exact = odds_map.get(_odds_key(home, away))
+    if exact is not None:
+        return exact
+    pairs = {tuple(k.split("|", 1)): v for k, v in odds_map.items() if "|" in k}
+    return teams.match_pair(home, away, pairs)
 
 
 def analyze_round(
@@ -58,7 +71,7 @@ def analyze_round(
             home_form = _fetch_form(provider, fx, "home", last, competition)
             away_form = _fetch_form(provider, fx, "away", last, competition)
             home_form.name, away_form.name = home, away
-            odds = odds_map.get(_odds_key(home, away))
+            odds = lookup_odds(odds_map, home, away)
             rep = analyze(home_form, away_form, league, ctx, odds)
             result.summaries.append(RoundMatchSummary(home, away, rep))
             label = f"{home} — {away}"

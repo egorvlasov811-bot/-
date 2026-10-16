@@ -235,3 +235,82 @@ def render_calibration(points: List[CalibPoint], top: int = 8,
     add("Подставь их в context матч-файла или в MatchContext, чтобы")
     add("использовать более точные настройки модели на этих данных.")
     return "\n".join(lines)
+
+
+# ------------------------------------------------ калибровка рейтинговой модели
+@dataclass
+class RatingsCalibPoint:
+    half_life_days: float
+    prior_games: float
+    rho: float
+    n: int
+    log_loss: float         # модель
+    market_log_loss: float  # рынок (без маржи) на тех же матчах
+
+
+DEFAULT_HALF_LIFE_GRID = (120.0, 240.0, 365.0, 730.0)
+DEFAULT_PRIOR_GAMES_GRID = (0.0, 2.0, 5.0)
+DEFAULT_RATINGS_RHO_GRID = (-0.1, -0.05, 0.0)
+
+
+def grid_search_ratings(
+    matches: Sequence,
+    *,
+    half_life_grid: Sequence[float] = DEFAULT_HALF_LIFE_GRID,
+    prior_games_grid: Sequence[float] = DEFAULT_PRIOR_GAMES_GRID,
+    rho_grid: Sequence[float] = DEFAULT_RATINGS_RHO_GRID,
+    min_matches: int = 4,
+) -> List[RatingsCalibPoint]:
+    """Walk-forward перебор параметров рейтинговой модели по log-loss 1X2.
+
+    Возвращает точки, отсортированные по log-loss модели (лучшее первым);
+    в каждой — log-loss рынка на тех же матчах для честного сравнения.
+    """
+    from .backtest import run_backtest
+    points: List[RatingsCalibPoint] = []
+    for hl in half_life_grid:
+        for pg in prior_games_grid:
+            for rho in rho_grid:
+                ctx = MatchContext(rho=rho, use_xg=False)
+                r = run_backtest(matches, min_ev=float("inf"),
+                                 min_matches=min_matches, ctx=ctx,
+                                 model="ratings", half_life_days=hl,
+                                 prior_games=pg)
+                points.append(RatingsCalibPoint(
+                    hl, pg, rho, r.ll_n,
+                    r.model_logloss if r.ll_n else float("inf"),
+                    r.market_logloss if r.ll_n else float("inf")))
+    points.sort(key=lambda p: p.log_loss)
+    return points
+
+
+def render_ratings_calibration(points: List[RatingsCalibPoint],
+                               top: int = 8) -> str:
+    lines: List[str] = []
+    add = lines.append
+    add("=" * 66)
+    add("  КАЛИБРОВКА РЕЙТИНГОВОЙ МОДЕЛИ (walk-forward, без подглядывания)")
+    add("=" * 66)
+    valid = [p for p in points if p.n > 0 and math.isfinite(p.log_loss)]
+    if not valid:
+        add("Недостаточно истории (или нет кэфов 1X2 для сравнения с рынком).")
+        return "\n".join(lines)
+    best = valid[0]
+    add(f"Оценено на {best.n} матчах. Метрика: log-loss 1X2 (меньше — точнее).")
+    add("")
+    add(f"{'полураспад':>11}{'псевдо-игр':>11}{'rho':>7}{'модель':>9}{'рынок':>9}")
+    for p in valid[:top]:
+        mark = "  <= лучшее" if p is best else ""
+        add(f"{p.half_life_days:>9.0f} д{p.prior_games:>11.1f}{p.rho:>7.2f}"
+            f"{p.log_loss:>9.4f}{p.market_log_loss:>9.4f}{mark}")
+    add("")
+    gap = best.log_loss - best.market_log_loss
+    add("Ориентир: угадайка 1X2 ≈ 1.0986.")
+    if gap > 0:
+        add(f"Рынок точнее модели на {gap:.4f}. Это норма: в кэфах — составы,")
+        add("новости и деньги профессионалов. Value по такой модели будет в")
+        add("основном шумом — смотри бэктест и CLV, прежде чем ставить.")
+    else:
+        add(f"Модель точнее рынка на {-gap:.4f} — редкость; перепроверь на")
+        add("других сезонах, прежде чем верить.")
+    return "\n".join(lines)

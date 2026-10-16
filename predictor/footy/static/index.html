@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>footy — анализ матчей</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #14171c; --muted: #667085;
+    --line: #e4e7ec; --accent: #1f7a4d; --accent-soft: #e3f3ea;
+    --home: #2f6fde; --draw: #98a2b3; --away: #d9534f; --warn: #a15c07;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --ink: #e8eaed; --muted: #98a2b3;
+      --line: #2a3039; --accent: #4cc38a; --accent-soft: #173326;
+      --home: #6b9cf5; --draw: #667085; --away: #f07a76; --warn: #f2b45a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { margin: 0 0 10px; font-size: 18px; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tabs button { border: 1px solid var(--line); background: transparent; color: var(--ink);
+                 padding: 6px 10px; border-radius: 999px; cursor: pointer; font-size: 13px; }
+  .tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  main { display: grid; grid-template-columns: minmax(260px, 360px) 1fr; gap: 16px;
+         padding: 16px; max-width: 1200px; margin: 0 auto; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  #list { overflow: hidden; align-self: start; }
+  .fx { padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .fx:last-child { border-bottom: 0; }
+  .fx:hover, .fx.on { background: var(--accent-soft); }
+  .fx .t { font-size: 12px; color: var(--muted); }
+  .empty { padding: 16px; color: var(--muted); }
+  #card { padding: 18px; min-height: 200px; }
+  h2 { margin: 0 0 4px; font-size: 20px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  .bar { display: flex; height: 30px; border-radius: 8px; overflow: hidden; margin: 6px 0 2px;
+         font-size: 12px; font-weight: 600; color: #fff; }
+  .bar div { display: flex; align-items: center; justify-content: center; min-width: 0; white-space: nowrap; }
+  .bar .h { background: var(--home); } .bar .d { background: var(--draw); } .bar .a { background: var(--away); }
+  .bar.mkt { height: 18px; opacity: .75; font-size: 11px; }
+  .lbl { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-top: 16px; }
+  .stat { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .stat .k { font-size: 12px; color: var(--muted); }
+  .stat .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.r, th.r { text-align: right; }
+  h3 { font-size: 14px; margin: 20px 0 6px; }
+  .verdict { margin-top: 16px; padding: 12px; border-radius: 10px; background: var(--accent-soft); }
+  .note { color: var(--warn); font-size: 13px; margin-top: 6px; }
+  .src { font-size: 12px; color: var(--muted); margin-top: 14px; }
+  .pos { color: var(--accent); font-weight: 600; }
+  .spin { color: var(--muted); padding: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚽ footy — анализ матчей</h1>
+  <div class="tabs" id="tabs"></div>
+</header>
+<main>
+  <section class="panel" id="list"><div class="spin">Загрузка…</div></section>
+  <section class="panel" id="card"><div class="empty">Выбери матч слева.</div></section>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const pct = (x) => (x * 100).toFixed(0) + "%";
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let comp = null;
+try { comp = localStorage.getItem("footy.comp"); } catch (e) {}
+
+async function api(path) {
+  const r = await fetch(path);
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || r.statusText);
+  return d;
+}
+
+function fmtTime(utc) {
+  const d = new Date(utc);
+  return d.toLocaleString("ru-RU", {weekday: "short", day: "2-digit", month: "2-digit",
+                                    hour: "2-digit", minute: "2-digit"});
+}
+
+async function loadTabs() {
+  const cs = await api("/api/competitions");
+  if (!cs.some(c => c.code === comp)) comp = "CL";
+  $("#tabs").innerHTML = cs.map(c =>
+    `<button data-c="${c.code}" class="${c.code === comp ? "on" : ""}" title="${esc(c.name)}">${esc(c.name.split("—").pop().trim())}</button>`).join("");
+  $("#tabs").onclick = (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    comp = b.dataset.c;
+    try { localStorage.setItem("footy.comp", comp); } catch (e) {}
+    document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x === b));
+    loadList();
+  };
+  loadList();
+}
+
+async function loadList() {
+  $("#list").innerHTML = `<div class="spin">Загрузка матчей…</div>`;
+  $("#card").innerHTML = `<div class="empty">Выбери матч слева.</div>`;
+  try {
+    const fx = await api(`/api/upcoming?c=${comp}&days=10`);
+    if (!fx.length) { $("#list").innerHTML = `<div class="empty">Ближайших матчей нет.</div>`; return; }
+    $("#list").innerHTML = fx.map(f =>
+      `<div class="fx" data-id="${f.id}"><div>${esc(f.home)} — ${esc(f.away)}</div><div class="t">${fmtTime(f.utc)}</div></div>`).join("");
+    $("#list").onclick = (e) => {
+      const el = e.target.closest(".fx"); if (!el) return;
+      document.querySelectorAll(".fx").forEach(x => x.classList.toggle("on", x === el));
+      loadMatch(el.dataset.id);
+    };
+  } catch (e) {
+    $("#list").innerHTML = `<div class="empty">Ошибка: ${esc(e.message)}</div>`;
+  }
+}
+
+function bar(p, cls = "") {
+  return `<div class="bar ${cls}"><div class="h" style="width:${p.home*100}%">${p.home > .08 ? pct(p.home) : ""}</div>` +
+         `<div class="d" style="width:${p.draw*100}%">${p.draw > .08 ? pct(p.draw) : ""}</div>` +
+         `<div class="a" style="width:${p.away*100}%">${p.away > .08 ? pct(p.away) : ""}</div></div>`;
+}
+
+async function loadMatch(id) {
+  $("#card").innerHTML = `<div class="spin">Считаю модель… (первый запрос по лиге может занять до минуты)</div>`;
+  try {
+    const d = await api(`/api/match?c=${comp}&id=${id}&days=10`);
+    const t = d.totals, s = d.sources;
+    const vb = d.value_bets.filter(b => b.ev > 0).slice(0, 6);
+    $("#card").innerHTML = `
+      <h2>${esc(d.home)} — ${esc(d.away)}</h2>
+      <div class="sub">${esc(d.competition_name)} · ${fmtTime(d.kickoff)} · ожидаемые голы ${d.lambda.home.toFixed(2)} — ${d.lambda.away.toFixed(2)}</div>
+      <div class="lbl"><span>П1</span><span>${d.basis === "market" ? "итог: линия + модель" : "модель (линии нет)"}</span><span>П2</span></div>
+      ${bar(d["1x2"])}
+      ${d.basis === "market" ? `<div class="lbl"><span>чистая модель (второе мнение)</span></div>${bar(d.model_1x2, "mkt")}` : ""}
+      <div class="grid">
+        <div class="stat"><div class="k">Тотал больше 1.5</div><div class="v">${pct(t["1.5"].over)}</div></div>
+        <div class="stat"><div class="k">Тотал больше 2.5</div><div class="v">${pct(t["2.5"].over)}</div></div>
+        <div class="stat"><div class="k">Тотал больше 3.5</div><div class="v">${pct(t["3.5"].over)}</div></div>
+        <div class="stat"><div class="k">Обе забьют</div><div class="v">${pct(d.btts.yes)}</div></div>
+        <div class="stat"><div class="k">Двойной шанс 1X / X2</div><div class="v">${pct(d.double_chance["1X"])} / ${pct(d.double_chance["X2"])}</div></div>
+      </div>
+      <h3>Вероятные счета</h3>
+      <table><tr><th>Счёт</th><th class="r">Вероятность</th></tr>
+        ${d.correct_scores.slice(0, 6).map(([sc, p]) => `<tr><td>${sc}</td><td class="r">${(p*100).toFixed(1)}%</td></tr>`).join("")}
+      </table>
+      ${vb.length ? `<h3>Кэфы выше честной линии (на истории ≈ 0 ROI)</h3>
+      <table><tr><th>Ставка</th><th class="r">Кэф</th><th class="r">Модель</th><th class="r">EV</th><th class="r">Келли</th></tr>
+        ${vb.map(b => `<tr><td>${esc(b.market.startsWith("Тотал") ? (b.selection === "Больше" ? "ТБ " : "ТМ ") + b.market.split(" ").pop() : b.selection)}</td><td class="r">${b.book_odds.toFixed(2)}</td><td class="r">${pct(b.model_prob)}</td><td class="r pos">${(b.ev*100).toFixed(1)}%</td><td class="r">${(b.kelly*100).toFixed(1)}%</td></tr>`).join("")}
+      </table>` : ""}
+      <div class="verdict">${esc(d.verdict)}</div>
+      ${d.notes.map(n => `<div class="note">⚠ ${esc(n)}</div>`).join("")}
+      <div class="src">Источники: ${s.ratings ? "рейтинг по истории ✓" : "рейтинг ✗ (только форма)"} · ${s.odds ? `кэфы ✓ (${s.books} контор)` : "кэфы ✗"}.
+        Вероятности, а не гарантии. Когда линия есть, итог на 90% строится от неё: на истории она точнее модели.</div>`;
+  } catch (e) {
+    $("#card").innerHTML = `<div class="empty">Ошибка: ${esc(e.message)}</div>`;
+  }
+}
+
+loadTabs();
+</script>
+</body>
+</html>

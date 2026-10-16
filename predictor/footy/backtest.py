@@ -13,11 +13,14 @@
 from __future__ import annotations
 
 import csv
+import glob
+import math
+import os
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from . import markets, poisson, value
+from . import markets, poisson, ratings, value
 from .analysis import LeagueContext, MatchContext, MatchResult, TeamForm
 
 
@@ -98,6 +101,11 @@ class BacktestResult:
     clv_sum: float = 0.0      # сумма CLV по ставкам, где известна закрывающая линия
     clv_n: int = 0            # сколько ставок с известной закрывающей линией
     clv_beats: int = 0        # на скольких мы взяли кэф ВЫШЕ закрывающего
+    # точность 1X2 (log-loss) модели против рынка на одних и тех же матчах
+    ll_n: int = 0
+    ll_model: float = 0.0
+    ll_market: float = 0.0
+    model: str = "form"
 
     @property
     def roi(self) -> float:
@@ -111,6 +119,14 @@ class BacktestResult:
     def mean_clv(self) -> float:
         """Средний CLV: насколько наш кэф был выше закрывающего (доля)."""
         return (self.clv_sum / self.clv_n) if self.clv_n > 0 else 0.0
+
+    @property
+    def model_logloss(self) -> float:
+        return (self.ll_model / self.ll_n) if self.ll_n else float("nan")
+
+    @property
+    def market_logloss(self) -> float:
+        return (self.ll_market / self.ll_n) if self.ll_n else float("nan")
 
     @property
     def clv_beat_rate(self) -> float:
@@ -177,29 +193,73 @@ def run_backtest(
     bankroll: float = 1000.0,
     kelly_frac: float = 0.25,
     total_lines: Tuple[float, ...] = (2.5,),
+    model: str = "form",        # 'form' (последние матчи) или 'ratings'
+    half_life_days: float = 365.0,
+    prior_games: float = 5.0,
+    refit_days: int = 3,
+    blend: float = 0.0,         # вес рынка в вероятности для отбора ставок
+    newcomers: bool = True,     # приор «новичок лиги слабее среднего»
 ) -> BacktestResult:
-    """Прогоняет стратегию по историческим матчам и возвращает метрики."""
+    """Прогоняет стратегию по историческим матчам и возвращает метрики.
+
+    model='ratings' — сила команд по ВСЕЙ прошлой истории (с затуханием по
+    времени, полураспад half_life_days), перефит каждые refit_days дней.
+    На реальных лигах это заметно точнее модели «последние N матчей».
+    blend>0 — вероятность для отбора = (1-blend)·модель + blend·рынок(без маржи).
+    """
+    if model not in ("form", "ratings"):
+        raise ValueError("model: 'form' или 'ratings'")
     ctx = ctx or MatchContext(use_xg=False)  # в CSV-истории xG обычно нет
     matches = sorted(matches, key=lambda m: m.date)
     league = _league_baseline(matches)
     hist: Dict[str, List[MatchResult]] = defaultdict(list)
-    res = BacktestResult(final_bankroll=bankroll if stake == "kelly" else None)
+    games: Dict[str, int] = defaultdict(int)
+    res = BacktestResult(final_bankroll=bankroll if stake == "kelly" else None,
+                         model=model)
     bank = bankroll
+    book: Optional[ratings.RatingBook] = None
+    fitted_on: Optional[str] = None
+    window_days = max(2 * half_life_days, 365.0)
+    nc_prior: Dict[int, Tuple[float, float]] = {}
 
-    for hm in matches:
+    for i, hm in enumerate(matches):
         res.matches_seen += 1
         h_hist, a_hist = hist[hm.home], hist[hm.away]
-        if len(h_hist) < min_matches or len(a_hist) < min_matches:
+        enough = (games[hm.home] >= min_matches and games[hm.away] >= min_matches)
+        if not enough:
             res.skipped_no_history += 1
             _append_history(hist, hm, form_window)
+            games[hm.home] += 1
+            games[hm.away] += 1
             continue
 
-        home = TeamForm(hm.home, list(h_hist))
-        away = TeamForm(hm.away, list(a_hist))
-        lam_h, lam_a = _predict_lambdas(home, away, league, ctx)
+        if model == "ratings":
+            if fitted_on is None or \
+                    ratings._days_between(fitted_on, hm.date) >= refit_days:
+                past = [m for m in matches[:i]
+                        if m.date < hm.date and
+                        ratings._days_between(m.date, hm.date) <= window_days]
+                season = ratings.season_of(hm.date)
+                if newcomers and season not in nc_prior:
+                    nc_prior[season] = ratings.newcomer_prior(matches[:i], season)
+                means = ratings.newcomer_means(past, hm.date, nc_prior[season]) \
+                    if newcomers else None
+                book = ratings.fit_ratings(
+                    past, ref_date=hm.date, half_life_days=half_life_days,
+                    prior_games=prior_games, init=book, iterations=40,
+                    tol=1e-5, prior_means=means, normalize=True)
+                fitted_on = hm.date
+            lam_h, lam_a = book.expected_goals(hm.home, hm.away)
+            lam_h *= ctx.home_mult
+            lam_a *= ctx.away_mult
+        else:
+            home = TeamForm(hm.home, list(h_hist))
+            away = TeamForm(hm.away, list(a_hist))
+            lam_h, lam_a = _predict_lambdas(home, away, league, ctx)
         matrix = poisson.score_matrix(lam_h, lam_a, ctx.max_goals, ctx.rho)
+        _record_logloss(res, matrix, hm)
 
-        for bet in _candidate_bets(matrix, hm, min_ev, total_lines):
+        for bet in _candidate_bets(matrix, hm, min_ev, total_lines, blend):
             market, sel, prob, odds, win, push = bet
             if stake == "kelly":
                 lose = max(0.0, 1.0 - win - push)
@@ -218,10 +278,39 @@ def run_backtest(
             res.equity_curve.append(bank if stake == "kelly" else res.profit)
 
         _append_history(hist, hm, form_window)
+        games[hm.home] += 1
+        games[hm.away] += 1
 
     if stake == "kelly":
         res.final_bankroll = bank
     return res
+
+
+def _no_margin(odds: dict, keys) -> Optional[List[float]]:
+    try:
+        inv = [1.0 / float(odds[k]) for k in keys]
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
+    s = sum(inv)
+    return [x / s for x in inv]
+
+
+def _record_logloss(res: BacktestResult, matrix, hm: HistMatch) -> None:
+    """Копит log-loss по 1X2 для модели и рынка (закрытие, иначе открытие)."""
+    keys = ("home", "draw", "away")
+    mkt = None
+    for src in (hm.closing.get("1x2") if hm.closing else None, hm.odds.get("1x2")):
+        if src:
+            mkt = _no_margin(src, keys)
+            if mkt:
+                break
+    if not mkt:
+        return
+    p = markets.outcome_1x2(matrix)
+    o = 0 if hm.hg > hm.ag else (1 if hm.hg == hm.ag else 2)
+    res.ll_model -= math.log(max(p[keys[o]], 1e-12))
+    res.ll_market -= math.log(max(mkt[o], 1e-12))
+    res.ll_n += 1
 
 
 def _predict_lambdas(home, away, league, ctx):
@@ -229,13 +318,28 @@ def _predict_lambdas(home, away, league, ctx):
     return expected_lambdas(home, away, league, ctx)
 
 
-def _candidate_bets(matrix, hm: HistMatch, min_ev: float, total_lines):
+def _blend_probs(probs: dict, odds: dict, keys, w: float) -> dict:
+    """(1-w)·модель + w·рынок без маржи (если рынок известен)."""
+    if w <= 0:
+        return probs
+    mkt = _no_margin(odds, keys)
+    if not mkt:
+        return probs
+    out = dict(probs)
+    for k, m in zip(keys, mkt):
+        out[k] = (1 - w) * probs[k] + w * m
+    return out
+
+
+def _candidate_bets(matrix, hm: HistMatch, min_ev: float, total_lines,
+                    blend: float = 0.0):
     """Генерирует ставки с EV > min_ev по доступным коэффициентам матча."""
     out = []
     o = hm.odds
 
     if "1x2" in o:
-        probs = markets.outcome_1x2(matrix)
+        probs = _blend_probs(markets.outcome_1x2(matrix), o["1x2"],
+                             ("home", "draw", "away"), blend)
         for sel in ("home", "draw", "away"):
             if sel in o["1x2"]:
                 p, od = probs[sel], o["1x2"][sel]
@@ -243,7 +347,8 @@ def _candidate_bets(matrix, hm: HistMatch, min_ev: float, total_lines):
                     out.append(("1X2", sel, p, od, p, 0.0))
 
     if "btts" in o:
-        probs = markets.btts(matrix)
+        probs = _blend_probs(markets.btts(matrix), o["btts"], ("yes", "no"),
+                             blend)
         for sel in ("yes", "no"):
             if sel in o["btts"]:
                 p, od = probs[sel], o["btts"][sel]
@@ -256,6 +361,8 @@ def _candidate_bets(matrix, hm: HistMatch, min_ev: float, total_lines):
             if key not in o["totals"]:
                 continue
             t = markets.totals(matrix, ln)
+            if not t.get("push"):
+                t = _blend_probs(t, o["totals"][key], ("over", "under"), blend)
             for sel in ("over", "under"):
                 if sel in o["totals"][key]:
                     od = o["totals"][key][sel]
@@ -278,11 +385,25 @@ def _settle_bet(market: str, sel: str, hm: HistMatch) -> Tuple[float, float]:
 
 # ---------------------------------------------------------------- загрузка данных
 
-def load_footballdata_csv(path: str) -> List[HistMatch]:
+# приоритет столбцов кэфов по источнику: (1X2, тотал 2.5)
+ODDS_SOURCES = {
+    "b365": (("B365", "Avg", "PS"), ("B365", "Avg")),
+    "avg": (("Avg", "B365", "PS"), ("Avg", "B365")),
+    "max": (("Max", "B365", "Avg"), ("Max", "B365", "Avg")),
+    "pinnacle": (("PS", "B365", "Avg"), ("P", "B365", "Avg")),
+}
+
+
+def load_footballdata_csv(path: str, odds_source: str = "b365") -> List[HistMatch]:
     """CSV с football-data.co.uk (внутренние лиги, с коэффициентами).
 
-    Берёт 1X2 (B365 или средние Avg) и тотал 2.5, если столбцы есть.
+    Берёт 1X2 и тотал 2.5, если столбцы есть. odds_source — чьи кэфы брать
+    для ставок: b365 (деф.), avg (среднее по рынку), max (лучший кэф среди
+    контор — так считают при line shopping), pinnacle.
     """
+    if odds_source not in ODDS_SOURCES:
+        raise ValueError(f"odds_source: {', '.join(ODDS_SOURCES)}")
+    x_pref, ou_pref = ODDS_SOURCES[odds_source]
     out: List[HistMatch] = []
     with open(path, "r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
@@ -290,12 +411,10 @@ def load_footballdata_csv(path: str) -> List[HistMatch]:
             if not row.get("HomeTeam") or row.get("FTHG") in (None, ""):
                 continue
             odds: dict = {}
-            x = _first(row, [("B365H", "B365D", "B365A"),
-                             ("AvgH", "AvgD", "AvgA"),
-                             ("PSH", "PSD", "PSA")])
+            x = _first(row, [(f"{p}H", f"{p}D", f"{p}A") for p in x_pref])
             if x:
                 odds["1x2"] = {"home": x[0], "draw": x[1], "away": x[2]}
-            ou = _first(row, [("B365>2.5", "B365<2.5"), ("Avg>2.5", "Avg<2.5")])
+            ou = _first(row, [(f"{p}>2.5", f"{p}<2.5") for p in ou_pref])
             if ou:
                 odds["totals"] = {"2.5": {"over": ou[0], "under": ou[1]}}
             # закрывающие 1X2 (суффикс C): Bet365/Pinnacle/среднее
@@ -347,3 +466,35 @@ def load_json_history(path: str) -> List[HistMatch]:
                       hg=int(m["hg"]), ag=int(m["ag"]), odds=m.get("odds", {}),
                       closing=m.get("closing", {}))
             for m in data]
+
+
+def load_history(paths, odds_source: str = "b365") -> List[HistMatch]:
+    """Загружает историю из одного или нескольких файлов (CSV/JSON).
+
+    paths — строка или список; поддерживаются маски ('hist/E0_*.csv') и
+    перечисление через запятую. Несколько сезонов подряд — модель видит
+    переход между ними (рейтинг переносится, новички стартуют средними).
+    """
+    if isinstance(paths, str):
+        paths = [paths]
+    files: List[str] = []
+    for item in paths:
+        for part in str(item).split(","):
+            part = part.strip()
+            if not part:
+                continue
+            found = sorted(glob.glob(part)) if any(c in part for c in "*?[") \
+                else [part]
+            if not found:
+                raise FileNotFoundError(f"нет файлов по маске: {part}")
+            files.extend(found)
+    out: List[HistMatch] = []
+    for f in files:
+        if not os.path.isfile(f):
+            raise FileNotFoundError(f)
+        if f.lower().endswith(".json"):
+            out.extend(load_json_history(f))
+        else:
+            out.extend(load_footballdata_csv(f, odds_source=odds_source))
+    out.sort(key=lambda m: m.date)
+    return out
