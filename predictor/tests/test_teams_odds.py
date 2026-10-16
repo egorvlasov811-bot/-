@@ -127,3 +127,15 @@ def test_exchange_commission_applied():
     best = oddsapi._collect(ev, "best")
     assert best["1x2"]["home"] == 2.95          # 3.0 на бирже = 2.90 после 5%
     assert oddsapi.net_price("betfair_ex_eu", 3.0) == 2.9
+
+
+def test_collect_spreads_and_merge():
+    ev = {"home_team": "A", "away_team": "B", "bookmakers": [
+        {"key": "pinnacle", "markets": [{"key": "spreads", "outcomes": [
+            {"name": "A", "price": 2.6, "point": -1.5}, {"name": "B", "price": 1.55, "point": 1.5}]}]},
+        {"key": "k", "markets": [{"key": "spreads", "outcomes": [
+            {"name": "A", "price": 2.5, "point": -1.5}, {"name": "B", "price": 1.5, "point": 1.5}]}]}]}
+    best = oddsapi._collect(ev, "best")
+    assert best["spreads"] == {"home": {"-1.5": 2.6}, "away": {"1.5": 1.55}}
+    fair = oddsapi._merge_fair(oddsapi._collect(ev, "pinnacle"), oddsapi._collect(ev, "avg"))
+    assert fair["spreads"]["home"]["-1.5"] == 2.6

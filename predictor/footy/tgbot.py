@@ -25,7 +25,8 @@ ApiCall = Callable[[str, dict], dict]
 
 HELP = ("⚽ <b>footy</b> — статистический разбор матчей.\n\n"
         "Выбери турнир кнопкой или напиши матч: <code>Arsenal - Chelsea</code>\n"
-        "С турниром: <code>Real Madrid - Barcelona PD</code>\n\n"
+        "С турниром: <code>Real Madrid - Barcelona PD</code>, хоккей: "
+        "<code>Toronto - Boston NHL</code>\n\n"
         "/today — лучшие ставки и экспрессы на сегодня. Утром в 9:00 МСК "
         "присылаю итоги вчерашних ставок.\n"
         "/express — экспрессы с максимальным шансом захода.\n"
@@ -60,6 +61,8 @@ def parse_match_text(text: str):
     if not m:
         return None
     home, away, code = m.group(1), m.group(2), m.group(3)
+    if code and code.upper() == "NHL":
+        return home.strip(), away.strip(), "NHL"
     if code:
         try:
             code = history.league(code).code
@@ -101,7 +104,15 @@ class Bot:
                 row = []
         if row:
             rows.append(row)
+        rows.append([{"text": "🏒 NHL", "callback_data": "hl"}])
         return rows
+
+    @property
+    def hockey(self):
+        if not hasattr(self, "_hockey"):
+            from .hockey_service import HockeyService
+            self._hockey = HockeyService(getattr(self.service, "odds_provider", None))
+        return self._hockey
 
     def express_keyboard(self):
         rows = [[{"text": "Самые надёжные (48 ч)", "callback_data": "x:ALL:48"}],
@@ -213,11 +224,41 @@ class Bot:
                             "или выбери турнир:", self.leagues_keyboard())
             return
         home, away, code = parsed
+        if code == "NHL":
+            from .hockey_service import render
+            g = self.hockey.find(home, away)
+            if g is None:
+                self.send(chat, "Не нашёл такой матч NHL в ближайшие 3 дня.")
+                return
+            self.send(chat, f"Считаю {g.home} — {g.away}…")
+            self.send(chat, render(self.hockey.analyze(g)))
+            return
         self.send(chat, f"Считаю {home} — {away}…")
         self.send(chat, format_text(self.service.analyze(code, home, away, with_btts=True)))
 
     def on_callback(self, chat: int, data: str) -> None:
         parts = data.split(":")
+        if parts[0] == "hl":
+            from .hockey_service import MSK
+            from datetime import datetime
+            games = self.hockey.upcoming(days=2)[:20]
+            if not games:
+                self.send(chat, "Ближайших матчей NHL нет.")
+                return
+            buttons = [[{"text": datetime.fromisoformat(g.start.replace("Z", "+00:00"))
+                         .astimezone(MSK).strftime("%d.%m %H:%M") + f"  {g.home_abbr} — {g.away_abbr}",
+                         "callback_data": f"hg:{g.id}"}] for g in games]
+            self.send(chat, "Ближайшие матчи NHL (время МСК):", buttons)
+            return
+        if parts[0] == "hg" and len(parts) == 2:
+            from .hockey_service import render
+            g = self.hockey.game(int(parts[1]))
+            if g is None:
+                self.send(chat, "Матч уже начался или не найден.")
+                return
+            self.send(chat, "Считаю модель NHL… (первый раз до минуты)")
+            self.send(chat, render(self.hockey.analyze(g)))
+            return
         if parts[0] == "c" and len(parts) == 2:
             fx = self.service.upcoming(parts[1], days=10)[:20]
             if not fx:

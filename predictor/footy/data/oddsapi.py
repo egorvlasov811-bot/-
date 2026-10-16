@@ -92,6 +92,11 @@ def _collect(event: dict, mode: str) -> dict:
                     sel = {home: "home", away: "away", "Draw": "draw"}.get(oc.get("name"))
                     if sel:
                         prices.setdefault(("1x2", sel), []).append(float(price))
+                elif mk.get("key") == "spreads" and oc.get("point") is not None:
+                    side = {home: "home", away: "away"}.get(oc.get("name"))
+                    if side:
+                        prices.setdefault(("spreads", f"{float(oc['point']):g}", side),
+                                          []).append(price)
                 elif mk.get("key") == "btts":
                     side = (oc.get("name") or "").lower()
                     if side in ("yes", "no"):
@@ -111,6 +116,8 @@ def _collect(event: dict, mode: str) -> dict:
             out.setdefault("1x2", {})[key[1]] = val
         elif key[0] == "btts":
             out.setdefault("btts", {})[key[1]] = val
+        elif key[0] == "spreads":
+            out.setdefault("spreads", {}).setdefault(key[2], {})[key[1]] = val
         else:
             out.setdefault("totals", {}).setdefault(key[1], {})[key[2]] = val
     # двухисходный рынок (NHL с овертаймом) — отдельно как «ml»
@@ -149,10 +156,14 @@ def _merge_fair(sharp: dict, avg: dict) -> dict:
     for m in ("1x2", "ml", "btts"):
         if sharp.get(m) or avg.get(m):
             out[m] = sharp.get(m) or avg.get(m)
-    tot = dict(avg.get("totals") or {})
-    tot.update(sharp.get("totals") or {})
-    if tot:
-        out["totals"] = tot
+    for m in ("totals", "spreads"):
+        x = dict(avg.get(m) or {})
+        for side, lines in (sharp.get(m) or {}).items() if m == "spreads" else ():
+            x.setdefault(side, {}).update(lines)
+        if m == "totals":
+            x.update(sharp.get(m) or {})
+        if x:
+            out[m] = x
     return out
 
 
