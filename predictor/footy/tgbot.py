@@ -26,6 +26,7 @@ ApiCall = Callable[[str, dict], dict]
 HELP = ("⚽ <b>footy</b> — статистический разбор матчей.\n\n"
         "Выбери турнир кнопкой или напиши матч: <code>Arsenal - Chelsea</code>\n"
         "С турниром: <code>Real Madrid - Barcelona PD</code>\n\n"
+        "/stats — журнал: точность прогнозов и CLV на реальных матчах.\n\n"
         "Модель даёт вероятности, а не гарантии. На истории букмекерская "
         "линия точнее модели — расхождения с ней это сигнал, а не верняк.")
 
@@ -125,6 +126,12 @@ class Bot:
             self.send(chat, f"Не получилось: {type(e).__name__}: {e}")
 
     def on_text(self, chat: int, text: str) -> None:
+        if text.startswith("/stats"):
+            from . import journal
+            rep = journal.report(journal.connect())
+            self.send(chat, "<pre>" + journal.render_report(rep)
+                      .replace("&", "&amp;").replace("<", "&lt;") + "</pre>")
+            return
         if text.startswith(("/start", "/help", "/leagues")):
             self.send(chat, HELP, self.leagues_keyboard())
             return

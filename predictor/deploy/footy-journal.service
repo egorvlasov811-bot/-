@@ -1,0 +1,9 @@
+[Unit]
+Description=footy journal snapshot (top leagues + CL, next 36h)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=footy
+WorkingDirectory=/opt/footy/app
+ExecStart=/opt/footy/venv/bin/python -m footy journal run

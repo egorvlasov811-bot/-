@@ -287,6 +287,24 @@ def cmd_bot(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_journal(args: argparse.Namespace) -> int:
+    _load_dotenv()
+    from . import journal
+    db = journal.connect(args.db or journal.DEFAULT_DB)
+    if args.action == "run":
+        from .service import FootyService
+        svc = FootyService()
+        comps = args.comps.split(",") if args.comps else journal.DEFAULT_COMPS
+        n = journal.record(svc, db, comps, window_hours=args.window)
+        r = journal.update_results(svc, db)
+        print(f"Снимков записано: {n}, результатов обновлено: {r}")
+    else:
+        rep = journal.report(db)
+        print(json.dumps(rep, ensure_ascii=False, indent=2) if args.json
+              else journal.render_report(rep))
+    return 0
+
+
 def cmd_download(args: argparse.Namespace) -> int:
     from .data import history
     codes = [c for c in args.leagues.split(",") if c] if args.leagues else \
@@ -695,6 +713,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("bot", parents=[common],
                         help="Telegram-бот (нужен TELEGRAM_BOT_TOKEN)")
     sp.set_defaults(func=cmd_bot)
+
+    sp = sub.add_parser("journal", parents=[common],
+                        help="журнал прогнозов: run — снимок+результаты, report — метрики")
+    sp.add_argument("action", choices=["run", "report"])
+    sp.add_argument("--comps", default=None,
+                    help="турниры через запятую (деф. CL,PL,PD,BL1,SA,FL1)")
+    sp.add_argument("--window", type=float, default=36.0,
+                    help="снимать матчи, начинающиеся в ближайшие N часов")
+    sp.add_argument("--db", default=None, help="путь к SQLite (деф. footy.db)")
+    sp.set_defaults(func=cmd_journal)
 
     sp = sub.add_parser("download", parents=[common],
                         help="скачать историю лиг с football-data.co.uk в hist/")

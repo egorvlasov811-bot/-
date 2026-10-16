@@ -168,6 +168,31 @@ Walk-forward на football-data.co.uk: 8 лиг × 4–5 сезонов, ~11 000
   лиге × результаты в ЛЧ) — log-loss 0.912 на 414 матчах ЛЧ 2024–2026.
   Без неё «Sabah — Дортмунд» выглядел почти равным матчем.
 
+## xG, травмы и журнал прогнозов
+
+- **xG (Understat, топ-5 лиг)** — рейтинг по xG смешивается с рейтингом по голам
+  (70/30). Walk-forward 2023–2026, ~5500 матчей: log-loss 1X2 0.9873 → 0.9839,
+  улучшение во всех пяти лигах. Скачивается сам, кэш в `hist/understat_*.json`.
+- **Травмы (АПЛ, Fantasy Premier League API)** — список «кто не сыграет / под
+  вопросом» в боте и вебе, и скромная поправка к атаке в модельной части
+  (доля игрока в xG+xA команды × P(не сыграет) × 0.5, не ниже ×0.8). Это
+  эвристика: архива травм нет, на истории не проверить. Для других лиг
+  бесплатного источника нет (API-Football free не даёт текущий сезон).
+- **Журнал** (`python -m footy journal run|report`, бот: `/stats`) — снимки
+  прогнозов и линии перед матчами ЛЧ и топ-5, затем счёт и закрывающая линия
+  (для лиг — закрытие Pinnacle из CSV football-data.co.uk, для ЛЧ — снимок за
+  ~1.5 ч до игры). Отчёт: точность итога/модели/линии/закрытия и **CLV**
+  «кэфов выше честной линии». Это проверка перевеса на будущем, а не на
+  истории. Лимит The Odds API (500/мес) расходуется ~6–12 кредитов в день.
+
+## Сервер
+
+`./deploy/deploy.sh [ssh-хост]` (деф. `tgpanel-backup`): код в `/opt/footy/app`,
+venv, systemd-сервисы `footy-bot`, `footy-web` (только localhost; открыть:
+`ssh -L 8050:127.0.0.1:8050 tgpanel-backup` → http://127.0.0.1:8050) и таймеры
+журнала (`footy-journal` ежедневно 08:00 UTC, `footy-journal-cl` вт/ср 15:30 UTC).
+Логи: `journalctl -u footy-bot -f`. `.env` копируется с правами 600.
+
 ## Веб-интерфейс и Telegram-бот
 
 ```bash
@@ -408,6 +433,9 @@ predictor/
     data/               — провайдеры + HTTP-кэш/бэкофф (http.py)
     teams.py            — сопоставление названий команд между источниками
     market_model.py     — ожидаемые голы из линии, итог «линия + модель»
+    journal.py          — журнал прогнозов, закрывающая линия, CLV
+    data/understat.py   — xG матчей топ-5 лиг
+    data/fpl.py         — травмы и вклад игроков АПЛ (FPL API)
     euro.py             — межлиговая сила для ЛЧ (страна × лига × еврокубок)
     service.py          — сервис для веба/бота: матчи, разбор, кэш
     web.py, static/     — веб-интерфейс (python -m footy serve)
@@ -415,9 +443,10 @@ predictor/
     data/oddsapi.py     — живые кэфы The Odds API
     data/history.py     — каталог лиг и загрузка CSV football-data.co.uk
     cli.py              — CLI (demo/predict/fetch/backtest/round/calibrate/
-                          rate/sgp/acca/odds/serve/bot/download)
+                          rate/sgp/acca/odds/serve/bot/download/journal)
+  deploy/               — deploy.sh + systemd-юниты (бот, веб, таймеры журнала)
   examples/             — примеры матча, тура, слейта экспрессов, истории
-  tests/                — тесты (pytest), 141 шт.
+  tests/                — тесты (pytest), 146 шт.
 ```
 
 ## Тесты

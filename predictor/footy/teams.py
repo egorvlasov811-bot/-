@@ -145,6 +145,13 @@ _ALIASES = {
     "augsburg": "augsburg",
     "freiburg": "freiburg",
     "hamburg": "hamburger",
+    "borussia m gladbach": "borussia monchengladbach",
+    "espanyol barcelona": "espanyol",
+    "espanol": "espanyol",
+    "brestois": "brest",
+    "brestois 29": "brest",
+    "rennais": "rennes",
+    "stade rennais": "rennes",
     "hamburger sv": "hamburger",
 }
 

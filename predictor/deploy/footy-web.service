@@ -1,0 +1,14 @@
+[Unit]
+Description=footy web UI (localhost only; open via SSH tunnel)
+After=network-online.target
+
+[Service]
+User=footy
+WorkingDirectory=/opt/footy/app
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/footy/venv/bin/python -m footy serve --host 127.0.0.1 --port 8050
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

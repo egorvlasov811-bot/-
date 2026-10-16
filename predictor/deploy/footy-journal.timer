@@ -1,0 +1,9 @@
+[Unit]
+Description=footy journal: daily snapshot
+
+[Timer]
+OnCalendar=*-*-* 08:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

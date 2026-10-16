@@ -106,6 +106,8 @@ class FootballDataProvider:
                 "utcDate": m.get("utcDate", ""),
                 "id": m.get("id"),
                 "status": m.get("status", ""),
+                "hg": ((m.get("score") or {}).get("fullTime") or {}).get("home"),
+                "ag": ((m.get("score") or {}).get("fullTime") or {}).get("away"),
             })
         return out
 

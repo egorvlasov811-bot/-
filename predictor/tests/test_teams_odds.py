@@ -97,3 +97,10 @@ def test_missing_key_raises(monkeypatch):
 def test_prefix_variants_from_football_data():
     assert teams.similarity("PAE AEK", "AEK Athens") >= 0.85
     assert teams.similarity("Club Brugge KV", "Club Brugge") == 1.0
+
+
+def test_understat_and_fd_variants():
+    assert teams.best_match("RCD Espanyol de Barcelona", ["Barcelona", "Espanyol"]) == "Espanyol"
+    assert teams.similarity("Borussia Mönchengladbach", "Borussia M.Gladbach") == 1.0
+    assert teams.similarity("Stade Brestois 29", "Brest") == 1.0
+    assert teams.similarity("Stade Rennais FC 1901", "Rennes") == 1.0

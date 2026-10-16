@@ -28,6 +28,9 @@ from .round_analyzer import _odds_key, lookup_odds
 
 HALF_LIFE_DAYS = 365.0
 PRIOR_GAMES = 5.0
+# доля xG-рейтинга в λ (топ-5 лиг, Understat): walk-forward 2023–2026,
+# ~5500 матчей — log-loss 1X2 0.9873 (голы) -> 0.9839 (70% xG), лучше во всех 5
+XG_WEIGHT = 0.7
 
 
 @dataclass
@@ -177,6 +180,44 @@ class FootyService:
         self.cache.put(key, model)
         return model
 
+    def injuries(self):
+        from .data.fpl import FplInjuries
+        hit = self.cache.get(("fpl",), 3 * 3600)
+        if hit is None:
+            hit = FplInjuries()
+            _ = hit.data
+            self.cache.put(("fpl",), hit)
+        return hit
+
+    def xg_book(self, competition: str) -> Optional[rt.RatingBook]:
+        """Рейтинг по xG (Understat) для топ-5 лиг; None, если данных нет."""
+        from .data import understat
+        code = history.league(competition).code
+        if code not in understat.LEAGUES:
+            return None
+        key = ("xgbook", code, self.today().isoformat())
+        hit = self.cache.get(key, 24 * 3600)
+        if hit is not None:
+            return hit or None  # type: ignore[return-value]
+        if self.auto_download:
+            cur = history.current_season_start(self.today())
+            try:
+                understat.download(code, list(range(cur - 3, cur + 1)),
+                                   self.hist_dir, today=self.today())
+            except Exception:
+                pass
+        files = understat.local_files(code, self.hist_dir)
+        book = None
+        if files:
+            ms = understat.load(files, use_xg=True)
+            ref = self.today().isoformat()
+            book = rt.fit_ratings(ms, ref_date=ref, half_life_days=HALF_LIFE_DAYS,
+                                  prior_games=PRIOR_GAMES,
+                                  prior_means=rt.newcomer_means(ms, ref),
+                                  normalize=True)
+        self.cache.put(key, book or False)
+        return book
+
     # ------------------------------------------------------------ кэфы
     def odds_map(self, competition: str, mode: str = "best") -> Dict[str, dict]:
         op = self.odds_provider
@@ -219,6 +260,7 @@ class FootyService:
         prior_known = {"home": False, "away": False}
         league_ctx = LeagueContext()
         euro_model = None
+        xg_used = False
         if not lg.csv:
             try:
                 euro_model = self.euro_model(lg.code)
@@ -243,6 +285,14 @@ class FootyService:
             prior = book.expected_goals(h_key or home, a_key or away)
             league_ctx = LeagueContext(home_goals=book.mu * book.home_adv,
                                        away_goals=book.mu)
+            xgb = self.xg_book(lg.code)
+            if xgb is not None and xgb.teams:
+                hx = teams.best_match(home, xgb.teams)
+                ax = teams.best_match(away, xgb.teams)
+                if hx and ax:
+                    px = xgb.expected_goals(hx, ax)
+                    prior = mm.blend_lambdas(prior, px, XG_WEIGHT)
+                    xg_used = True
             for side, ok in prior_known.items():
                 if not ok:
                     notes.append(f"{home if side == 'home' else away}: нет в истории "
@@ -252,6 +302,20 @@ class FootyService:
         else:
             notes.append("Еврокубок без межлигового рейтинга — прогноз по форме "
                          "во внутренней лиге (сильно переоценивает слабые лиги).")
+
+        # травмы/дисквалификации (АПЛ, FPL): список + скромная поправка к атаке
+        # в модельной части; линия их уже учла, итог на 90% от неё
+        absences = {}
+        if lg.code == "PL":
+            try:
+                inj = self.injuries()
+                for side, name in (("home", home), ("away", away)):
+                    absences[side] = inj.absences(name)
+                if prior is not None:
+                    prior = (prior[0] * inj.attack_multiplier(home),
+                             prior[1] * inj.attack_multiplier(away))
+            except Exception as e:
+                notes.append(f"Травмы недоступны ({type(e).__name__}).")
 
         # Форма из API — только запасной вариант: football-data отдаёт ВСЕ
         # матчи команды (кубки со слабыми соперниками), из-за чего тоталы
@@ -307,10 +371,16 @@ class FootyService:
                 "form_games": [len(hf.matches), len(af.matches)],
                 "ratings": prior is not None,
                 "ratings_known": prior_known,
+                "xg": xg_used,
                 "odds": bool(odds),
                 "books": (line or {}).get("books", 0),
             },
             "odds": odds or {},
+            "fair_odds": fair,
+            "absences": {side: [{"name": a.name, "position": a.position,
+                                 "p_out": round(a.p_out, 2), "news": a.news,
+                                 "xgi_share": round(a.xgi_share, 3)}
+                                for a in lst] for side, lst in absences.items()},
             "notes": notes,
         })
         if p1x2:
@@ -386,6 +456,14 @@ def format_text(d: dict) -> str:
     lines.append(f"Обе забьют: {_pct(d['btts']['yes'])}")
     cs = ", ".join(f"{s} ({_pct(pr)})" for s, pr in d["correct_scores"][:3])
     lines.append(f"Счёт: {cs}")
+    for side in ("home", "away"):
+        lst = (d.get("absences") or {}).get(side) or []
+        if lst:
+            parts = []
+            for a in lst[:4]:
+                tag = "не сыграет" if a["p_out"] >= 0.99 else f"{(1 - a['p_out']) * 100:.0f}%"
+                parts.append(f"{a['name']} ({tag})")
+            lines.append(f"🚑 {_esc(d[side])}: {_esc(', '.join(parts))}")
     vb = [b for b in d["value_bets"] if b["ev"] > 0][:3]
     if vb:
         lines.append("")

@@ -1,0 +1,15 @@
+[Unit]
+Description=footy Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=footy
+WorkingDirectory=/opt/footy/app
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/footy/venv/bin/python -m footy bot
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

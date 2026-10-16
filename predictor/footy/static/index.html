@@ -148,6 +148,8 @@ async function loadMatch(id) {
         <div class="stat"><div class="k">Обе забьют</div><div class="v">${pct(d.btts.yes)}</div></div>
         <div class="stat"><div class="k">Двойной шанс 1X / X2</div><div class="v">${pct(d.double_chance["1X"])} / ${pct(d.double_chance["X2"])}</div></div>
       </div>
+      ${["home","away"].filter(k => (d.absences||{})[k] && d.absences[k].length).map(k =>
+        `<div class="note">🚑 ${esc(d[k])}: ${d.absences[k].slice(0,5).map(a => esc(a.name) + " (" + (a.p_out >= .99 ? "не сыграет" : Math.round((1-a.p_out)*100) + "%") + ")").join(", ")}</div>`).join("")}
       <h3>Вероятные счета</h3>
       <table><tr><th>Счёт</th><th class="r">Вероятность</th></tr>
         ${d.correct_scores.slice(0, 6).map(([sc, p]) => `<tr><td>${sc}</td><td class="r">${(p*100).toFixed(1)}%</td></tr>`).join("")}
@@ -158,7 +160,7 @@ async function loadMatch(id) {
       </table>` : ""}
       <div class="verdict">${esc(d.verdict)}</div>
       ${d.notes.map(n => `<div class="note">⚠ ${esc(n)}</div>`).join("")}
-      <div class="src">Источники: ${s.ratings ? "рейтинг по истории ✓" : "рейтинг ✗ (только форма)"} · ${s.odds ? `кэфы ✓ (${s.books} контор)` : "кэфы ✗"}.
+      <div class="src">Источники: ${s.ratings ? "рейтинг по истории ✓" : "рейтинг ✗ (только форма)"} · ${s.xg ? "xG ✓ · " : ""}${s.odds ? `кэфы ✓ (${s.books} контор)` : "кэфы ✗"}.
         Вероятности, а не гарантии. Когда линия есть, итог на 90% строится от неё: на истории она точнее модели.</div>`;
   } catch (e) {
     $("#card").innerHTML = `<div class="empty">Ошибка: ${esc(e.message)}</div>`;
