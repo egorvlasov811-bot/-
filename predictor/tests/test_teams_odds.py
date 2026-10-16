@@ -35,7 +35,7 @@ def test_lookup_odds_fuzzy():
 
 EVENT = {
     "home_team": "Arsenal", "away_team": "Chelsea",
-    "commence_time": "2026-10-20T19:00:00Z",
+    "commence_time": "2099-10-20T19:00:00Z",
     "bookmakers": [
         {"key": "pinnacle", "markets": [
             {"key": "h2h", "outcomes": [
@@ -104,3 +104,15 @@ def test_understat_and_fd_variants():
     assert teams.similarity("Borussia Mönchengladbach", "Borussia M.Gladbach") == 1.0
     assert teams.similarity("Stade Brestois 29", "Brest") == 1.0
     assert teams.similarity("Stade Rennais FC 1901", "Rennes") == 1.0
+
+
+
+def test_live_events_are_dropped():
+    from datetime import datetime, timezone
+    live = dict(EVENT, commence_time="2026-10-16T10:00:00Z")
+
+    def fake_fetch(url, headers, params, timeout):
+        return 200, [live, EVENT], None
+    p = oddsapi.OddsApiProvider(api_key="k", http=HttpClient(fetch=fake_fetch))
+    evs = p.events("PL", now=datetime(2026, 10, 16, 12, tzinfo=timezone.utc))
+    assert len(evs) == 1 and evs[0].commence.startswith("2099")

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from .http import HttpClient, client_from_env
@@ -149,10 +150,22 @@ class OddsApiProvider:
                     "dateFormat": "iso"})
         return data if isinstance(data, list) else []
 
-    def events(self, competition: str, mode: str = "best") -> List[EventOdds]:
-        """Ближайшие матчи турнира с кэфами, сведёнными по способу mode."""
+    def events(self, competition: str, mode: str = "best",
+               now: Optional[datetime] = None) -> List[EventOdds]:
+        """Ближайшие матчи турнира с кэфами, сведёнными по способу mode.
+
+        Уже начавшиеся матчи отбрасываются: API отдаёт и live-кэфы, а в них
+        учтён текущий счёт — смешивать их с предматчевой моделью нельзя.
+        """
+        now = now or datetime.now(timezone.utc)
         out = []
         for ev in self.raw_events(competition):
+            try:
+                ko = datetime.fromisoformat(ev.get("commence_time", "").replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if ko <= now:
+                continue
             odds = _collect(ev, mode)
             books = sum(1 for bm in ev.get("bookmakers", [])
                         if mode in ("best", "avg") or bm.get("key") == mode)
