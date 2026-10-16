@@ -322,6 +322,31 @@ def cmd_express(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_digest(args: argparse.Namespace) -> int:
+    _load_dotenv()
+    from . import digest, journal
+    from .service import FootyService
+    db = journal.connect(args.db or journal.DEFAULT_DB)
+    ids = [int(x) for x in os.environ.get("TELEGRAM_ALLOWED_IDS", "")
+           .replace(" ", "").split(",") if x]
+    if args.dry_run or not ids:
+        send, ids = (lambda chat, text: None), [0]
+    else:
+        from .tgbot import _http_api
+        api = _http_api(os.environ["TELEGRAM_BOT_TOKEN"])
+        send = lambda chat, text: api("sendMessage", {
+            "chat_id": chat, "text": text, "parse_mode": "HTML",
+            "disable_web_page_preview": True})
+    text = digest.run(FootyService(), db, send, ids)
+    if args.dry_run:
+        import re
+        print(re.sub(r"</?[bi]>", "", text).replace("&lt;", "<")
+              .replace("&gt;", ">").replace("&amp;", "&"))
+    else:
+        print(f"Рассылка отправлена: {len(ids)} получателей")
+    return 0
+
+
 def cmd_download(args: argparse.Namespace) -> int:
     from .data import history
     codes = [c for c in args.leagues.split(",") if c] if args.leagues else \
@@ -752,6 +777,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--target", type=float, default=None,
                     help="целевой кэф (напр. 3 или 5): макс. шанс при кэфе ≥ цели")
     sp.set_defaults(func=cmd_express)
+
+    sp = sub.add_parser("digest", parents=[common],
+                        help="утренняя рассылка: итоги вчера + ставки и экспрессы дня")
+    sp.add_argument("--dry-run", action="store_true",
+                    help="только показать текст, не отправлять")
+    sp.add_argument("--db", default=None, help="путь к SQLite (деф. footy.db)")
+    sp.set_defaults(func=cmd_digest)
 
     sp = sub.add_parser("download", parents=[common],
                         help="скачать историю лиг с football-data.co.uk в hist/")

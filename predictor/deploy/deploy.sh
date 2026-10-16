@@ -29,7 +29,13 @@ ssh "$HOST" 'set -e
   systemctl daemon-reload
   systemctl enable -q footy-bot footy-web
   systemctl restart footy-bot footy-web
-  systemctl enable -q --now footy-journal.timer footy-journal-cl.timer
+  # утренний снимок журнала теперь делает footy-digest (те же кэфы)
+  if [ -f /etc/systemd/system/footy-journal.timer ]; then
+    systemctl disable -q --now footy-journal.timer || true
+    rm -f /etc/systemd/system/footy-journal.timer /etc/systemd/system/footy-journal.service
+    systemctl daemon-reload
+  fi
+  systemctl enable -q --now footy-digest.timer footy-journal-cl.timer
   sleep 2
   systemctl --no-pager --lines=0 status footy-bot footy-web | grep -E "●|Active"'
 echo "Готово. Веб: ssh -L 8050:127.0.0.1:8050 $HOST  ->  http://127.0.0.1:8050"

@@ -1,0 +1,9 @@
+[Unit]
+Description=footy morning digest at 09:00 MSK
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

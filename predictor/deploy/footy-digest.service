@@ -1,0 +1,9 @@
+[Unit]
+Description=footy morning digest: journal snapshot + yesterday results + today picks
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=footy
+WorkingDirectory=/opt/footy/app
+ExecStart=/opt/footy/venv/bin/python -m footy digest

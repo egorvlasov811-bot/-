@@ -38,6 +38,7 @@ class Leg:
     selection: str
     prob: float
     price: Optional[float]   # лучший реальный кэф (None — в линии нет)
+    fixture_id: Optional[int] = None
 
     @property
     def fair(self) -> float:
@@ -111,6 +112,7 @@ def candidate_legs(d: dict) -> List[Leg]:
     """
     label = f"{d['home']} — {d['away']}"
     comp, ko = d.get("competition", ""), d.get("kickoff", "")
+    fid = d.get("fixture_id")
     # экспресс ставится в ОДНОЙ конторе: цены — средние по конторам, а не
     # лучшие по каждой ноге (их в одном купоне не собрать)
     book = d.get("avg_odds") or d.get("odds") or {}
@@ -139,6 +141,8 @@ def candidate_legs(d: dict) -> List[Leg]:
                        over, t.get("over")))
         out.append(Leg(label, comp, ko, f"Тотал {line}", f"ТМ {line}",
                        1.0 - over, t.get("under")))
+    for l in out:
+        l.fixture_id = fid
     return out
 
 

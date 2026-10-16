@@ -26,6 +26,8 @@ ApiCall = Callable[[str, dict], dict]
 HELP = ("⚽ <b>footy</b> — статистический разбор матчей.\n\n"
         "Выбери турнир кнопкой или напиши матч: <code>Arsenal - Chelsea</code>\n"
         "С турниром: <code>Real Madrid - Barcelona PD</code>\n\n"
+        "/today — лучшие ставки и экспрессы на сегодня "
+        "(сам присылаю каждое утро в 9:00 МСК).\n"
         "/express — экспрессы с максимальным шансом захода.\n"
         "/stats — журнал: точность прогнозов и CLV на реальных матчах.\n\n"
         "Модель даёт вероятности, а не гарантии. На истории букмекерская "
@@ -150,6 +152,14 @@ class Bot:
             rep = journal.report(journal.connect())
             self.send(chat, "<pre>" + journal.render_report(rep)
                       .replace("&", "&amp;").replace("<", "&lt;") + "</pre>")
+            return
+        if text.startswith("/today"):
+            from . import digest
+            from .service import EXPRESS_COMPS
+            self.send(chat, "Собираю подборку на сегодня… (до минуты)")
+            picks, expresses, n = digest.build_today(self.service, EXPRESS_COMPS)
+            self.send(chat, digest.today_text(picks, expresses, n) if n else
+                      "Сегодня в ЛЧ и топ-5 лигах матчей с линией нет.")
             return
         if text.startswith("/express"):
             self.send(chat, "Экспресс с максимальным шансом захода — откуда брать матчи?",

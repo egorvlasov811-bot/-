@@ -397,6 +397,7 @@ class FootyService:
 
         d = report.report_to_dict(rep)
         d["model_1x2"] = {k: round(v, 4) for k, v in model_rep.one_x_two.items()}
+        d["model_over25"] = round(model_rep.totals[2.5]["over"], 4)
         d["model_lambda"] = {"home": round(model_rep.lam_home, 3),
                              "away": round(model_rep.lam_away, 3)}
         d["basis"] = "market" if p1x2 else "model"
