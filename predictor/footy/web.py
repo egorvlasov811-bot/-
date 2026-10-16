@@ -59,6 +59,15 @@ def make_handler(service: FootyService):
                         self._json({"error": "матч не найден"}, 404)
                     else:
                         self._json(service.analyze_fixture(f))
+                elif url.path == "/api/express":
+                    from . import express as ex
+                    from .service import EXPRESS_COMPS
+                    c = q.get("c", "ALL")
+                    comps = EXPRESS_COMPS if c == "ALL" else (c,)
+                    v, considered, n = service.express(
+                        comps, hours=float(q.get("hours", 48)))
+                    self._json({"variants": ex.to_dict(v), "legs": considered,
+                                "matches": n})
                 elif url.path == "/api/predict":
                     self._json(service.analyze(q.get("c", "PL"), q["home"], q["away"]))
                 else:

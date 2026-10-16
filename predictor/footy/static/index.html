@@ -65,6 +65,7 @@
 <header>
   <h1>⚽ footy — анализ матчей</h1>
   <div class="tabs" id="tabs"></div>
+  <div class="tabs" style="margin-top:8px"><button id="xbtn">🎯 Экспресс: макс. шанс захода (48 ч, все топ-турниры)</button></div>
 </header>
 <main>
   <section class="panel" id="list"><div class="spin">Загрузка…</div></section>
@@ -167,6 +168,22 @@ async function loadMatch(id) {
     $("#card").innerHTML = `<div class="empty">Ошибка: ${esc(e.message)}</div>`;
   }
 }
+
+$("#xbtn").onclick = async () => {
+  document.querySelectorAll(".fx").forEach(x => x.classList.remove("on"));
+  $("#card").innerHTML = `<div class="spin">Собираю экспрессы… (до минуты)</div>`;
+  try {
+    const r = await api(`/api/express?c=ALL&hours=48`);
+    if (!r.variants.length) { $("#card").innerHTML = `<div class="empty">Не набралось двух надёжных исходов (матчей: ${r.matches}).</div>`; return; }
+    $("#card").innerHTML = `<h2>Экспрессы с максимальным шансом захода</h2>
+      <div class="sub">Матчей с линией: ${r.matches}, надёжных исходов: ${r.legs}. Одна нога на матч.</div>` +
+      r.variants.map(v => `<h3>${esc(v.title)} — заход ${pct(v.prob)}, кэф ${v.estimated ? "≈" : ""}${v.price.toFixed(2)}, EV ${v.estimated ? "≈" : ""}${(v.ev*100).toFixed(0)}%</h3>
+        <table><tr><th>Матч</th><th>Исход</th><th class="r">Шанс</th><th class="r">Кэф</th></tr>
+        ${v.legs.map(l => `<tr><td>${esc(l.match)}</td><td>${esc(l.selection)}</td><td class="r">${pct(l.prob)}</td><td class="r">${l.price ? l.price.toFixed(2) : "≈" + l.est_price.toFixed(2) + "*"}</td></tr>`).join("")}
+        </table>`).join("") +
+      `<div class="src">Шанс — итоговый прогноз (на 90% от линии). Кэфы — лучшие среди контор; * — исхода нет в нашей линии, кэф — оценка (справедливый минус ~6% маржи). Маржа в экспрессе умножается: в долгую такие ставки в среднем в минусе.</div>`;
+  } catch (e) { $("#card").innerHTML = `<div class="empty">Ошибка: ${esc(e.message)}</div>`; }
+};
 
 loadTabs();
 </script>

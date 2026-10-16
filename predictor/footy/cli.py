@@ -305,6 +305,22 @@ def cmd_journal(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_express(args: argparse.Namespace) -> int:
+    _load_dotenv()
+    from . import express as ex
+    from .service import EXPRESS_COMPS, FootyService
+    comps = EXPRESS_COMPS if args.competition == "ALL" else (args.competition,)
+    v, considered, n = FootyService().express(
+        comps, hours=args.hours, min_prob=args.min_prob, target_odds=args.target)
+    if args.json:
+        print(json.dumps(ex.to_dict(v), ensure_ascii=False, indent=2))
+    else:
+        import re
+        print(re.sub(r"</?[bi]>", "", ex.render_text(v, considered, n))
+              .replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
+    return 0
+
+
 def cmd_download(args: argparse.Namespace) -> int:
     from .data import history
     codes = [c for c in args.leagues.split(",") if c] if args.leagues else \
@@ -723,6 +739,18 @@ def build_parser() -> argparse.ArgumentParser:
                     help="снимать матчи, начинающиеся в ближайшие N часов")
     sp.add_argument("--db", default=None, help="путь к SQLite (деф. footy.db)")
     sp.set_defaults(func=cmd_journal)
+
+    sp = sub.add_parser("express", parents=[common],
+                        help="экспрессы с макс. шансом захода (итог от линии)")
+    sp.add_argument("--competition", default="ALL",
+                    help="ALL (ЛЧ + топ-5) или код турнира")
+    sp.add_argument("--hours", type=float, default=48.0,
+                    help="матчи, начинающиеся в ближайшие N часов")
+    sp.add_argument("--min-prob", type=float, default=0.60,
+                    help="минимальная вероятность ноги")
+    sp.add_argument("--target", type=float, default=2.0,
+                    help="целевой кэф для варианта «под кэф»")
+    sp.set_defaults(func=cmd_express)
 
     sp = sub.add_parser("download", parents=[common],
                         help="скачать историю лиг с football-data.co.uk в hist/")

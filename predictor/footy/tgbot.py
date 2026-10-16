@@ -26,6 +26,7 @@ ApiCall = Callable[[str, dict], dict]
 HELP = ("⚽ <b>footy</b> — статистический разбор матчей.\n\n"
         "Выбери турнир кнопкой или напиши матч: <code>Arsenal - Chelsea</code>\n"
         "С турниром: <code>Real Madrid - Barcelona PD</code>\n\n"
+        "/express — экспрессы с максимальным шансом захода.\n"
         "/stats — журнал: точность прогнозов и CLV на реальных матчах.\n\n"
         "Модель даёт вероятности, а не гарантии. На истории букмекерская "
         "линия точнее модели — расхождения с ней это сигнал, а не верняк.")
@@ -90,6 +91,20 @@ class Bot:
             rows.append(row)
         return rows
 
+    def express_keyboard(self):
+        rows = [[{"text": "Все топ-турниры, 48 ч", "callback_data": "x:ALL:48"}],
+                [{"text": "Все топ-турниры, 24 ч", "callback_data": "x:ALL:24"}]]
+        row = []
+        for code in ("CL", "PL", "PD", "BL1", "SA", "FL1"):
+            name = history.league(code).name.split("—")[-1].strip()
+            row.append({"text": name, "callback_data": f"x:{code}:72"})
+            if len(row) == 3:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+        return rows
+
     # --------------------------------------------------------- обработка
     def handle(self, upd: dict) -> None:
         if "callback_query" in upd:
@@ -132,6 +147,10 @@ class Bot:
             self.send(chat, "<pre>" + journal.render_report(rep)
                       .replace("&", "&amp;").replace("<", "&lt;") + "</pre>")
             return
+        if text.startswith("/express"):
+            self.send(chat, "Экспресс с максимальным шансом захода — откуда брать матчи?",
+                      self.express_keyboard())
+            return
         if text.startswith(("/start", "/help", "/leagues")):
             self.send(chat, HELP, self.leagues_keyboard())
             return
@@ -156,6 +175,13 @@ class Bot:
             buttons = [[{"text": f"{_fmt_kickoff(f.utc)[:11]}  {f.home} — {f.away}"[:60],
                          "callback_data": f"m:{f.competition}:{f.id}"}] for f in fx]
             self.send(chat, "Ближайшие матчи:", buttons)
+        elif parts[0] == "x" and len(parts) == 3:
+            from . import express as ex
+            from .service import EXPRESS_COMPS
+            comps = EXPRESS_COMPS if parts[1] == "ALL" else (parts[1],)
+            self.send(chat, "Собираю экспрессы… (до минуты)")
+            variants, considered, n = self.service.express(comps, hours=float(parts[2]))
+            self.send(chat, ex.render_text(variants, considered, n))
         elif parts[0] == "m" and len(parts) == 3:
             f = self.service.fixture(parts[1], int(parts[2]), days=10)
             if f is None:

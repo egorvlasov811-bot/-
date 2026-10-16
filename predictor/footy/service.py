@@ -16,7 +16,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import backtest as bt
 from . import ratings as rt
@@ -28,6 +28,10 @@ from .round_analyzer import _odds_key, lookup_odds
 
 HALF_LIFE_DAYS = 365.0
 PRIOR_GAMES = 5.0
+# турниры для экспресса «по всем»: каждый тянет линию (2 кредита The Odds API,
+# кэш 10 минут)
+EXPRESS_COMPS = ("CL", "PL", "PD", "BL1", "SA", "FL1")
+
 # доля xG-рейтинга в λ (топ-5 лиг, Understat): walk-forward 2023–2026,
 # ~5500 матчей — log-loss 1X2 0.9873 (голы) -> 0.9839 (70% xG), лучше во всех 5
 XG_WEIGHT = 0.7
@@ -425,6 +429,38 @@ class FootyService:
         d["verdict"] = _verdict(d)
         self.cache.put(key, d)
         return d
+
+    def express(self, competitions: Sequence[str], hours: float = 48.0,
+                market_only: bool = True, **kw):
+        """Экспрессы с макс. шансом захода по матчам ближайших `hours` часов.
+
+        market_only — только матчи с линией (итог от рынка точнее модели).
+        Возвращает (варианты, надёжных исходов, матчей просмотрено).
+        """
+        from . import express as ex
+        now = datetime.now(timezone.utc)
+        analyses = []
+        for comp in competitions:
+            try:
+                fixtures = self.upcoming(comp, days=max(1, int(hours // 24) + 1))
+            except Exception:
+                continue
+            for f in fixtures:
+                try:
+                    ko = datetime.fromisoformat(f.utc.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if not now < ko <= now + timedelta(hours=hours):
+                    continue
+                try:
+                    d = self.analyze_fixture(f)
+                except Exception:
+                    continue
+                if market_only and d.get("basis") != "market":
+                    continue
+                analyses.append(d)
+        variants, considered = ex.build(analyses, **kw)
+        return variants, considered, len(analyses)
 
     def analyze_fixture(self, fx: Fixture, with_odds: bool = True) -> dict:
         d = self.analyze(fx.competition, fx.home, fx.away, home_id=fx.home_id,
