@@ -269,7 +269,7 @@ class FootyService:
         except Exception:
             return {}
         out = {_odds_key(e.home, e.away): {"best": e.odds, "fair": e.fair,
-                                            "books": e.books}
+                                            "avg": e.avg, "books": e.books}
                for e in events if e.odds}
         self.cache.put(key, out)
         return out
@@ -414,6 +414,7 @@ class FootyService:
             },
             "odds": odds or {},
             "fair_odds": fair,
+            "avg_odds": (line or {}).get("avg") or {},
             "absences": {side: [{"name": a.name, "position": a.position,
                                  "p_out": round(a.p_out, 2), "news": a.news,
                                  "xgi_share": round(a.xgi_share, 3)}
@@ -459,7 +460,12 @@ class FootyService:
                 if market_only and d.get("basis") != "market":
                     continue
                 analyses.append(d)
-        variants, considered = ex.build(analyses, **kw)
+        target = kw.pop("target", None)
+        if target:
+            variants = ex.build_target(analyses, float(target))
+            considered = len(analyses)
+        else:
+            variants, considered = ex.build(analyses, **kw)
         return variants, considered, len(analyses)
 
     def analyze_fixture(self, fx: Fixture, with_odds: bool = True) -> dict:

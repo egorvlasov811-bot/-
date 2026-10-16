@@ -72,3 +72,18 @@ def test_price_edges_compares_same_outcome():
     assert ("1X2", "П1") in sels and ("Тотал 2.5", "Меньше") in sels
     assert ("1X2", "X") not in sels
     assert all(not b.market.endswith("3.5") for b in bets)  # нет честной линии 3.5
+
+
+def test_market_probs_ignores_quarter_and_integer_lines():
+    _, overs = mm.market_probs({"totals": {"2.75": {"over": 1.9, "under": 1.9},
+                                           "3.0": {"over": 2, "under": 1.8},
+                                           "2.5": {"over": 1.7, "under": 2.2}}})
+    assert list(overs) == [2.5]
+
+
+def test_merge_fair_fills_missing_lines_from_avg():
+    from footy.data.oddsapi import _merge_fair
+    sharp = {"1x2": {"home": 2, "draw": 3.5, "away": 4}, "totals": {"2.75": {"over": 1.9, "under": 2}}}
+    avg = {"1x2": {"home": 1.9, "draw": 3.4, "away": 3.9}, "totals": {"2.5": {"over": 1.65, "under": 2.2}}}
+    f = _merge_fair(sharp, avg)
+    assert f["1x2"]["home"] == 2 and set(f["totals"]) == {"2.5", "2.75"}

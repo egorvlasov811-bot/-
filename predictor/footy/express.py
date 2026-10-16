@@ -5,11 +5,12 @@
 (самая вероятная): исходы одного матча связаны, перемножать их нельзя.
 Матчи между собой считаем независимыми: P(экспресса) = произведение P ног.
 
-Вероятности — итоговые (на 90% от честной линии), кэфы — лучшие реальные
-среди контор. Двойной шанс в линии The Odds API не котируется, его цена
-собирается из лучших кэфов двух исходов: 1/(1/k1 + 1/k2) — ставка на оба
-исхода в пропорции даёт ровно такую выплату (dutching). Для «обе забьют»
-реального кэфа нет — показывается справедливый (1/P).
+Вероятности — из честной линии (Pinnacle/среднее без маржи) для исходов,
+которые в ней есть, иначе итоговая матрица. Кэфы — СРЕДНИЕ по конторам:
+экспресс ставится в одной конторе, лучшие цены разных контор в один купон не
+собрать. Двойной шанс в линии The Odds API не котируется — его цена
+собирается из кэфов двух исходов: 1/(1/k1 + 1/k2) (примерно так его и
+считает контора). Для исходов вне линии (ТБ 1.5, «обе забьют») — оценка.
 
 Честно: высокий шанс захода = низкий кэф, а маржа в экспрессе умножается.
 Такие экспрессы в долгую в среднем убыточны; EV показывается в каждом варианте.
@@ -89,17 +90,36 @@ class Express:
 def _dutch(*odds) -> Optional[float]:
     if not all(odds):
         return None
-    return 1.0 / sum(1.0 / float(o) for o in odds)
+    return round(1.0 / sum(1.0 / float(o) for o in odds), 3)
+
+
+def _fair_probs(d: dict):
+    """Вероятности честной линии без маржи: (1X2 | None, {линия: P(больше)})."""
+    from .market_model import market_probs
+    p1x2, overs = market_probs(d.get("fair_odds") or {})
+    return p1x2, {f"{k:g}" if "." in f"{k:g}" else f"{k:g}.0": v
+                  for k, v in overs.items()}
 
 
 def candidate_legs(d: dict) -> List[Leg]:
-    """Все ноги «надёжного меню» для матча из разбора сервиса."""
+    """Все ноги «надёжного меню» для матча из разбора сервиса.
+
+    Вероятность исхода, который есть в честной линии (1X2, двойной шанс из
+    1X2, тоталы), берётся ИЗ ЛИНИИ: матрица счёта повторяет её неточно, и
+    расхождение выглядело бы как ложный перевес. Для исходов вне линии (ТБ 1.5,
+    «обе забьют») — итоговая матрица.
+    """
     label = f"{d['home']} — {d['away']}"
     comp, ko = d.get("competition", ""), d.get("kickoff", "")
-    x = (d.get("odds") or {}).get("1x2") or {}
-    tot = (d.get("odds") or {}).get("totals") or {}
-    p = d["1x2"]
-    dc = d["double_chance"]
+    # экспресс ставится в ОДНОЙ конторе: цены — средние по конторам, а не
+    # лучшие по каждой ноге (их в одном купоне не собрать)
+    book = d.get("avg_odds") or d.get("odds") or {}
+    x = book.get("1x2") or {}
+    tot = book.get("totals") or {}
+    fair1x2, fair_over = _fair_probs(d)
+    p = fair1x2 or d["1x2"]
+    dc = ({"1X": p["home"] + p["draw"], "12": p["home"] + p["away"],
+           "X2": p["draw"] + p["away"]} if fair1x2 else d["double_chance"])
     out = [
         Leg(label, comp, ko, "1X2", f"П1 ({d['home']})", p["home"], x.get("home")),
         Leg(label, comp, ko, "1X2", f"П2 ({d['away']})", p["away"], x.get("away")),
@@ -114,10 +134,11 @@ def candidate_legs(d: dict) -> List[Leg]:
     ]
     for line, sides in d["totals"].items():
         t = tot.get(line) or tot.get(f"{float(line):g}") or {}
+        over = fair_over.get(line, sides["over"])
         out.append(Leg(label, comp, ko, f"Тотал {line}", f"ТБ {line}",
-                       sides["over"], t.get("over")))
+                       over, t.get("over")))
         out.append(Leg(label, comp, ko, f"Тотал {line}", f"ТМ {line}",
-                       sides["under"], t.get("under")))
+                       1.0 - over, t.get("under")))
     return out
 
 
@@ -144,8 +165,7 @@ def best_leg(d: dict, min_prob: float = MIN_PROB,
 
 
 def build(analyses: Sequence[dict], *, min_prob: float = MIN_PROB,
-          min_price: float = MIN_PRICE, target_odds: float = 2.0
-          ) -> Tuple[List[Express], int]:
+          min_price: float = MIN_PRICE) -> Tuple[List[Express], int]:
     """Варианты экспрессов, отсортированные по шансу захода.
 
     Возвращает (варианты, сколько матчей дали надёжную ногу).
@@ -166,19 +186,57 @@ def build(analyses: Sequence[dict], *, min_prob: float = MIN_PROB,
             add(f"Самый надёжный на {k}", legs[:k])
     if len(legs) >= 6:
         add("Альтернатива на 3 (другие матчи)", legs[3:6])
-    # под целевой кэф: добавляем самые надёжные ноги, пока кэф не дорастёт
-    acc: List[Leg] = []
-    for l in legs:
-        acc.append(l)
-        if _odds(Express("", acc)) >= target_odds:
-            break
-    if _odds(Express("", acc)) >= target_odds * 0.95:
-        add(f"Под кэф ≈{target_odds:g}", acc)
     return out, len(legs)
 
 
-def _odds(e: Express) -> float:
-    return e.price
+# --------------------------------------------- экспресс под целевой кэф (3, 5…)
+TARGET_MIN_LEG_PROB = 0.35   # без «лотерейных» ног
+_BIN = 0.005                 # шаг сетки по log(кэфа)
+
+
+def build_target(analyses: Sequence[dict], target: float, *, min_legs: int = 2,
+                 max_legs: int = 5, min_leg_prob: float = TARGET_MIN_LEG_PROB,
+                 top: int = 3) -> List[Express]:
+    """Экспрессы с МАКСИМАЛЬНЫМ шансом захода при кэфе ≥ target.
+
+    Рюкзак по log(кэфа): максимизируем Σ log P при Σ log кэф ≥ log target,
+    одна нога на матч, число ног min_legs..max_legs. Решение — лучшее для
+    каждого числа ног; возвращаются top вариантов по шансу.
+
+    Почему не «набрать надёжных до нужного кэфа»: маржа есть в каждой ноге и
+    в экспрессе умножается, поэтому при том же кэфе меньше ног с хорошей ценой
+    почти всегда дают больший шанс захода, чем много ног по 1.15.
+    """
+    import math
+    goal = math.log(target)
+    cap = int(round(goal / _BIN))          # всё, что ≥ target, — в одну ячейку
+    matches = []
+    for d in analyses:
+        legs = [l for l in candidate_legs(d)
+                if l.prob >= min_leg_prob and l.est_price > 1.01]
+        if legs:
+            matches.append(legs)
+    # dp[k][b] = (Σ log P, ноги) — лучшее для k ног и «накопленного кэфа» b
+    dp: List[Dict[int, Tuple[float, tuple]]] = [dict() for _ in range(max_legs + 1)]
+    dp[0][0] = (0.0, ())
+    for legs in matches:
+        for k in range(max_legs - 1, -1, -1):     # одна нога на матч
+            for b, (lp, chosen) in list(dp[k].items()):
+                for l in legs:
+                    nb = min(cap, b + int(round(math.log(l.est_price) / _BIN)))
+                    val = lp + math.log(l.prob)
+                    cur = dp[k + 1].get(nb)
+                    if cur is None or val > cur[0]:
+                        dp[k + 1][nb] = (val, chosen + (l,))
+    out = []
+    for k in range(min_legs, max_legs + 1):
+        hit = dp[k].get(cap)
+        if hit:
+            e = Express(f"Кэф ≥{target:g} на {k}", list(hit[1]))
+            if e.price >= target * 0.99:
+                out.append(e)
+    out.sort(key=lambda e: e.prob, reverse=True)
+    return out[:top]
 
 
 def _pct(x: float) -> str:
@@ -189,13 +247,20 @@ def _esc(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def render_text(variants: List[Express], considered: int, matches: int) -> str:
+def render_text(variants: List[Express], considered: int, matches: int,
+                target: Optional[float] = None) -> str:
     """Текст для Telegram (HTML)."""
     if not variants:
-        return ("Не набралось хотя бы двух надёжных исходов "
+        return ("Не набралось подходящих исходов "
                 f"(матчей просмотрено: {matches}). Попробуй другой турнир или позже.")
-    lines = [f"<b>Экспрессы с макс. шансом захода</b> "
-             f"(матчей: {matches}, надёжных исходов: {considered})"]
+    if target:
+        lines = [f"<b>Экспрессы с кэфом ≥{target:g} и макс. шансом захода</b> "
+                 f"(матчей: {matches})",
+                 "Чем меньше событий, тем меньше маржи — поэтому при том же кэфе "
+                 "2–3 события обычно заходят чаще, чем 5–6 «надёжных»."]
+    else:
+        lines = [f"<b>Экспрессы с макс. шансом захода</b> "
+                 f"(матчей: {matches}, надёжных исходов: {considered})"]
     for e in variants:
         approx = "≈" if e.estimated else ""
         lines += ["", f"<b>{_esc(e.title)}</b> — заход {_pct(e.prob)}, "
@@ -205,9 +270,9 @@ def render_text(variants: List[Express], considered: int, matches: int) -> str:
             lines.append(f"• {_esc(l.match)}: {_esc(l.selection)} — "
                          f"{_pct(l.prob)} @ {k}")
     lines += ["",
-              "<i>Шанс — итоговый прогноз (на 90% от линии). Кэфы — лучшие среди "
-              "контор; * — исхода нет в нашей линии, кэф — оценка (справедливый минус "
-              "~6% маржи), сверь у своей конторы. "
+              "<i>Шанс — по честной линии без маржи. Кэфы — средние по конторам "
+              "(экспресс ставится в одной конторе); * — исхода нет в нашей линии, "
+              "кэф — оценка (справедливый минус ~6% маржи). Сверь у своей конторы. "
               "Маржа в экспрессе умножается: в долгую такие ставки в среднем "
               "в минусе. Это самые вероятные комбинации, а не верняк.</i>"]
     return "\n".join(lines)

@@ -76,8 +76,9 @@ def market_probs(odds: dict) -> Tuple[Optional[Dict[str, float]], Dict[float, fl
             line = float(ln)
         except ValueError:
             continue
-        # целые линии (с возвратом) пропускаем: «больше» там не равно P(>line)
-        if abs(line - round(line)) < 1e-9:
+        # только половинные линии (x.5): на целых и четвертных (2.75) есть
+        # возврат/половина ставки — «больше» там не равно P(тотал > линии)
+        if abs((line % 1) - 0.5) > 1e-9:
             continue
         if ok(t.get("over")) and ok(t.get("under")):
             overs[line] = remove_margin({"over": t["over"], "under": t["under"]})["over"]

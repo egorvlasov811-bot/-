@@ -310,13 +310,14 @@ def cmd_express(args: argparse.Namespace) -> int:
     from . import express as ex
     from .service import EXPRESS_COMPS, FootyService
     comps = EXPRESS_COMPS if args.competition == "ALL" else (args.competition,)
-    v, considered, n = FootyService().express(
-        comps, hours=args.hours, min_prob=args.min_prob, target_odds=args.target)
+    kw = {"target": args.target} if args.target else {"min_prob": args.min_prob}
+    v, considered, n = FootyService().express(comps, hours=args.hours, **kw)
     if args.json:
         print(json.dumps(ex.to_dict(v), ensure_ascii=False, indent=2))
     else:
         import re
-        print(re.sub(r"</?[bi]>", "", ex.render_text(v, considered, n))
+        print(re.sub(r"</?[bi]>", "", ex.render_text(v, considered, n,
+                                                     target=args.target))
               .replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
     return 0
 
@@ -748,8 +749,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="матчи, начинающиеся в ближайшие N часов")
     sp.add_argument("--min-prob", type=float, default=0.60,
                     help="минимальная вероятность ноги")
-    sp.add_argument("--target", type=float, default=2.0,
-                    help="целевой кэф для варианта «под кэф»")
+    sp.add_argument("--target", type=float, default=None,
+                    help="целевой кэф (напр. 3 или 5): макс. шанс при кэфе ≥ цели")
     sp.set_defaults(func=cmd_express)
 
     sp = sub.add_parser("download", parents=[common],

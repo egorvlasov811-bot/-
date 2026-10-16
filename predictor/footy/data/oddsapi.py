@@ -57,6 +57,7 @@ class EventOdds:
     odds: dict = field(default_factory=dict)   # формат движка (по mode)
     books: int = 0                             # сколько контор дали цену
     fair: dict = field(default_factory=dict)   # «честная» линия: Pinnacle или среднее
+    avg: dict = field(default_factory=dict)    # средние кэфы (цена «обычной» конторы)
 
 
 def _collect(event: dict, mode: str) -> dict:
@@ -114,6 +115,17 @@ def _robust_best(xs: List[float]) -> float:
     return max(ok)
 
 
+def _merge_fair(sharp: dict, avg: dict) -> dict:
+    """Честная линия: Pinnacle, а рынки/линии, которых у него нет, — среднее
+    по конторам (напр. у Pinnacle тотал 2.75, а у остальных 2.5)."""
+    out = {"1x2": sharp.get("1x2") or avg.get("1x2")} if (sharp.get("1x2") or avg.get("1x2")) else {}
+    tot = dict(avg.get("totals") or {})
+    tot.update(sharp.get("totals") or {})
+    if tot:
+        out["totals"] = tot
+    return out
+
+
 class OddsApiProvider:
     def __init__(self, api_key: Optional[str] = None,
                  http: Optional[HttpClient] = None, regions: str = "eu"):
@@ -144,13 +156,12 @@ class OddsApiProvider:
             odds = _collect(ev, mode)
             books = sum(1 for bm in ev.get("bookmakers", [])
                         if mode in ("best", "avg") or bm.get("key") == mode)
-            fair = _collect(ev, "pinnacle")
-            if "1x2" not in fair:
-                fair = _collect(ev, "avg")
+            avg = _collect(ev, "avg")
+            fair = _merge_fair(_collect(ev, "pinnacle"), avg)
             out.append(EventOdds(home=ev.get("home_team", ""),
                                  away=ev.get("away_team", ""),
                                  commence=ev.get("commence_time", ""),
-                                 odds=odds, books=books, fair=fair))
+                                 odds=odds, books=books, fair=fair, avg=avg))
         out.sort(key=lambda e: e.commence)
         return out
 

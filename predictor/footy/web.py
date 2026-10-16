@@ -65,7 +65,8 @@ def make_handler(service: FootyService):
                     c = q.get("c", "ALL")
                     comps = EXPRESS_COMPS if c == "ALL" else (c,)
                     v, considered, n = service.express(
-                        comps, hours=float(q.get("hours", 48)))
+                        comps, hours=float(q.get("hours", 48)),
+                        target=float(q["target"]) if q.get("target") else None)
                     self._json({"variants": ex.to_dict(v), "legs": considered,
                                 "matches": n})
                 elif url.path == "/api/predict":

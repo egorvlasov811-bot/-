@@ -92,8 +92,11 @@ class Bot:
         return rows
 
     def express_keyboard(self):
-        rows = [[{"text": "Все топ-турниры, 48 ч", "callback_data": "x:ALL:48"}],
-                [{"text": "Все топ-турниры, 24 ч", "callback_data": "x:ALL:24"}]]
+        rows = [[{"text": "Самые надёжные (48 ч)", "callback_data": "x:ALL:48"}],
+                [{"text": "Кэф ~2", "callback_data": "x:ALL:48:2"},
+                 {"text": "Кэф ~3", "callback_data": "x:ALL:48:3"},
+                 {"text": "Кэф ~5", "callback_data": "x:ALL:48:5"}],
+                [{"text": "Самые надёжные (24 ч)", "callback_data": "x:ALL:24"}]]
         row = []
         for code in ("CL", "PL", "PD", "BL1", "SA", "FL1"):
             name = history.league(code).name.split("—")[-1].strip()
@@ -175,13 +178,15 @@ class Bot:
             buttons = [[{"text": f"{_fmt_kickoff(f.utc)[:11]}  {f.home} — {f.away}"[:60],
                          "callback_data": f"m:{f.competition}:{f.id}"}] for f in fx]
             self.send(chat, "Ближайшие матчи:", buttons)
-        elif parts[0] == "x" and len(parts) == 3:
+        elif parts[0] == "x" and len(parts) in (3, 4):
             from . import express as ex
             from .service import EXPRESS_COMPS
             comps = EXPRESS_COMPS if parts[1] == "ALL" else (parts[1],)
+            target = float(parts[3]) if len(parts) == 4 else None
             self.send(chat, "Собираю экспрессы… (до минуты)")
-            variants, considered, n = self.service.express(comps, hours=float(parts[2]))
-            self.send(chat, ex.render_text(variants, considered, n))
+            variants, considered, n = self.service.express(
+                comps, hours=float(parts[2]), target=target)
+            self.send(chat, ex.render_text(variants, considered, n, target=target))
         elif parts[0] == "m" and len(parts) == 3:
             f = self.service.fixture(parts[1], int(parts[2]), days=10)
             if f is None:
