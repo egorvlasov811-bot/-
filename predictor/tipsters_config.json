@@ -1,6 +1,6 @@
 {
   "_comment": "Фильтр каперов. Правь числа и перезапускай — код менять не нужно. Пояснения в footy/tipsters.py",
-  "sports": ["football", "hockey", "tennis"],
+  "sports": ["football", "hockey"],
   "bbr": {
     "min_graded": 60,
     "min_priced": 40,

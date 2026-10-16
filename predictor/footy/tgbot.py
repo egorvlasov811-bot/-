@@ -29,9 +29,10 @@ HELP = ("⚽ <b>footy</b> — статистический разбор матч
         "/today — лучшие ставки и экспрессы на сегодня. Утром в 9:00 МСК "
         "присылаю итоги вчерашних ставок.\n"
         "/express — экспрессы с максимальным шансом захода.\n"
-        "/tips — прогнозы проверенных каперов (футбол, хоккей, теннис), "
+        "/tips — прогнозы проверенных каперов (футбол, хоккей), "
         "сверенные с линией.\n"
         "/stats — журнал: точность прогнозов и CLV на реальных матчах.\n"
+        "/books — где ставить: какие конторы дают цену ближе к честной.\n"
         "/credits — сколько осталось кредитов The Odds API.\n\n"
         "Модель даёт вероятности, а не гарантии. На истории букмекерская "
         "линия точнее модели — расхождения с ней это сигнал, а не верняк.")
@@ -158,9 +159,11 @@ class Bot:
     def on_text(self, chat: int, text: str) -> None:
         if text.startswith("/stats"):
             from . import journal
-            rep = journal.report(journal.connect())
-            self.send(chat, "<pre>" + journal.render_report(rep)
-                      .replace("&", "&amp;").replace("<", "&lt;") + "</pre>")
+            db = journal.connect()
+            text = journal.render_report(journal.report(db)) + "\n\n" + \
+                journal.render_calibration(journal.calibration(db))
+            self.send(chat, "<pre>" + text.replace("&", "&amp;").replace("<", "&lt;")
+                      + "</pre>")
             return
         if text.startswith("/tips"):
             from . import tips_service as ts
@@ -186,6 +189,11 @@ class Bot:
                     digest.save_on_demand(journal.connect(), analyses, picks, expresses)
                 except Exception as e:
                     print(f"save: {e}")
+            return
+        if text.startswith("/books"):
+            from . import journal
+            rep = journal.render_books(journal.book_report(journal.connect()))
+            self.send(chat, "<pre>" + rep.replace("&", "&amp;").replace("<", "&lt;") + "</pre>")
             return
         if text.startswith("/credits"):
             self.send(chat, self._credits_line().strip() or "Ключ The Odds API не задан.")
@@ -232,7 +240,16 @@ class Bot:
             if f is None:
                 self.send(chat, "Матч уже не в списке ближайших.")
                 return
-            self.send(chat, format_text(self.service.analyze_fixture(f)))
+            d = self.service.analyze_fixture(f)
+            self.send(chat, format_text(d))
+            try:  # ранний снимок для журнала и «движения линии» — бесплатно
+                from datetime import datetime, timezone
+                from . import journal
+                db = journal.connect()
+                journal._save_snapshot(db, d, f, datetime.now(timezone.utc))
+                db.commit()
+            except Exception as e:
+                print(f"journal: {e}")
 
     # --------------------------------------------------------- цикл
     def poll_once(self, timeout: int = 30) -> int:

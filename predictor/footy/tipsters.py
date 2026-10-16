@@ -14,7 +14,7 @@
        * активен за последние 2 недели и не «сыплется» последние 30 дней.
   2. Прогнозы прошедших фильтр каперов группируются по событию и исходу.
   3. Вероятность исхода берётся из честной линии (наш сервис для футбола,
-     The Odds API для NHL/SHL/Liiga/AHL и крупного тенниса), а если линии
+     The Odds API для NHL/SHL/Liiga/AHL), а если линии
      нет — из кэфов самих каперов минус типичная маржа. Каперы сдвигают её
      осторожно: на сжатый ROI, не больше max_tipster_shift (3 п.п.).
   4. Уверенность 0–100: линия есть/нет, сколько проверенных каперов
@@ -40,7 +40,7 @@ MSK = timezone(timedelta(hours=3))
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "tipsters_config.json")
 
 DEFAULTS = {
-    "sports": ["football", "hockey", "tennis"],
+    "sports": ["football", "hockey"],
     "bbr": {"min_graded": 60, "min_priced": 40, "prior_roi": -0.035, "shrink_k": 200,
             "min_shrunk_roi": 0.0, "min_edge_z": 1.0, "min_avg_odds": 1.35,
             "max_avg_odds": 3.5, "max_deleted_share": 0.10, "active_days": 14,

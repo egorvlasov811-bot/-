@@ -88,3 +88,39 @@ def test_reserve_guard_skips_odds(tmp_path):
     svc, sent = Svc(left=10), []
     alerts.run(svc, db, lambda c, t: sent.append(t), [5], ["PD"], now=NOW, reserve=50)
     assert svc.calls == [(7, False)] and "линию не тянул" in sent[0]
+
+
+def test_line_move_warning(tmp_path):
+    db = journal.connect(str(tmp_path / "m.db"))
+    early = _d(fair=(0.38, 0.28, 0.34))
+    f = Fixture(7, "PD", "Depor", "Levante", 1, 2, "2026-10-16T18:00:00Z", "TIMED")
+    journal._save_snapshot(db, early, f, NOW - timedelta(hours=5))
+    db.commit()
+    svc, sent = Svc(), []
+    alerts.run(svc, db, lambda c, t: sent.append(t), [5], ["PD"], now=NOW)
+    text = sent[0]
+    assert "линия сдвинулась" in text and "38% → 45%" in text
+    assert "это плюс" in text            # П1 рекомендована, её шанс вырос
+
+
+def test_alert_picks_feed_calibration(tmp_path):
+    db = journal.connect(str(tmp_path / "c.db"))
+    svc, sent = Svc(), []
+    alerts.run(svc, db, lambda c, t: sent.append(t), [5], ["PD"], now=NOW)
+    assert db.execute("SELECT COUNT(*) FROM alert_picks").fetchone()[0] >= 1
+    db.execute("INSERT OR REPLACE INTO results VALUES (7,'PD',2,1,0.5,0.25,0.25,0.5,'csv')")
+    c = journal.calibration(db)
+    assert c["matches"] == 1 and c["picks"]
+    lvl = next(iter(c["picks"].values()))
+    assert lvl["n"] >= 1 and lvl["clv"] is not None
+    assert "ПРОВЕРКА" in journal.render_calibration(c)
+
+
+def test_morning_results_include_alert_picks(tmp_path):
+    from footy import digest
+    db = journal.connect(str(tmp_path / "r.db"))
+    svc = Svc()
+    alerts.run(svc, db, lambda c, t: None, [5], ["PD"], now=NOW)
+    db.execute("INSERT OR REPLACE INTO results (fixture_id, competition, hg, ag) VALUES (7,'PD',2,1)")
+    text = digest.results_text(db, NOW.astimezone(digest.MSK).date().isoformat())
+    assert "🔔" in text and "✅" in text and "Depor" in text

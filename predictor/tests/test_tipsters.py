@@ -30,7 +30,7 @@ def test_red_flags():
     assert not tp.qualify(_t(odds=1.15), "football", CFG, NOW).ok         # набивка фаворитами
     assert not tp.qualify(_t(last="2026-09-01T00:00:00Z"), "football", CFG, NOW).ok
     assert not tp.qualify(_t(hit=0.50, exp=0.52), "football", CFG, NOW).ok  # заход ниже ожидания
-    assert not tp.qualify(_t(), "tennis", CFG, NOW).ok                    # нет статистики в теннисе
+    assert not tp.qualify(_t(), "hockey", CFG, NOW).ok                    # нет статистики в хоккее
 
 
 def _pick(user, side="h", odds=1.9, src="bbr", home="Arsenal", away="Chelsea"):

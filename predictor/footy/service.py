@@ -269,7 +269,8 @@ class FootyService:
         except Exception:
             return {}
         out = {_odds_key(e.home, e.away): {"best": e.odds, "fair": e.fair,
-                                            "avg": e.avg, "books": e.books}
+                                            "avg": e.avg, "books": e.books,
+                                            "per_book": e.per_book}
                for e in events if e.odds}
         self.cache.put(key, out)
         return out
@@ -416,6 +417,7 @@ class FootyService:
             "odds": odds or {},
             "fair_odds": fair,
             "avg_odds": (line or {}).get("avg") or {},
+            "book_odds": (line or {}).get("per_book") or {},
             "absences": {side: [{"name": a.name, "position": a.position,
                                  "p_out": round(a.p_out, 2), "news": a.news,
                                  "xgi_share": round(a.xgi_share, 3)}
@@ -428,6 +430,7 @@ class FootyService:
                             euro_model)
         if elo:
             d["elo_1x2"] = elo
+        _finalize_1x2(d, p1x2, overs if p1x2 else {}, elo)
         d["verdict"] = _verdict(d)
         self.cache.put(key, d)
         return d
@@ -476,6 +479,39 @@ class FootyService:
         return d
 
 
+# вес Elo в итоге без линии: walk-forward 2024–2026, 8 лиг, 4380 матчей —
+# модель 0.9933, Elo 0.9896, модель+Elo 50/50 0.9878 (log-loss 1X2). К линии
+# ни модель, ни Elo не добавляют точности (0.9679 -> 0.9682+), поэтому при
+# наличии линии итог по 1X2 — чистая линия.
+ELO_WEIGHT_NO_LINE = 0.5
+
+
+def _pool(a: dict, b: dict, w: float) -> dict:
+    import math
+    q = {k: (a[k] ** (1 - w)) * (b[k] ** w) for k in ("home", "draw", "away")}
+    z = sum(q.values())
+    return {k: v / z for k, v in q.items()}
+
+
+def _finalize_1x2(d: dict, p1x2: Optional[dict], overs: dict, elo: Optional[dict]) -> None:
+    """Итоговые 1X2/двойной шанс/тоталы: линия, если есть; иначе модель+Elo."""
+    if p1x2:
+        fin = dict(p1x2)
+        for ln, p in overs.items():
+            key = f"{ln:g}"
+            if key in d["totals"]:
+                d["totals"][key] = {"over": round(p, 4), "under": round(1 - p, 4)}
+    elif elo:
+        fin = _pool(d["1x2"], elo, ELO_WEIGHT_NO_LINE)
+        d["basis"] = "model+elo"
+    else:
+        return
+    d["1x2"] = {k: round(v, 4) for k, v in fin.items()}
+    d["double_chance"] = {"1X": round(fin["home"] + fin["draw"], 4),
+                          "12": round(fin["home"] + fin["away"], 4),
+                          "X2": round(fin["draw"] + fin["away"], 4)}
+
+
 def _verdict(d: dict) -> str:
     """Короткий честный итог по матчу."""
     p = d["1x2"]
@@ -503,8 +539,8 @@ def _verdict(d: dict) -> str:
                          f"{b['book_odds']:.2f} (EV {b['ev'] * 100:+.1f}%). На "
                          "истории такие ставки дают около нуля — не источник дохода.")
     else:
-        parts.append("Линии нет — прогноз только по модели (на истории она "
-                     "уступает букмекерам).")
+        parts.append("Линии нет — прогноз по модели и Elo (вместе точнее, чем "
+                     "по отдельности, но букмекерам на истории уступают).")
     return " ".join(parts)
 
 

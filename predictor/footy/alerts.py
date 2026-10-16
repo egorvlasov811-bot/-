@@ -40,6 +40,8 @@ MODEL_SLACK, ELO_SLACK = 0.03, 0.05
 DISAGREE = 0.08
 MIN_PROB = 0.35
 DEFAULT_COMPS = ("CL", "PL", "PD", "BL1", "SA", "FL1")
+MOVE_PP = 0.04            # сдвиг честной вероятности, о котором предупреждаем
+MOVE_MIN_AGE_MIN = 90     # ранний снимок должен быть старше 1.5 ч
 
 SCHEMA = "CREATE TABLE IF NOT EXISTS alerts (fixture_id INTEGER PRIMARY KEY, sent_at TEXT)"
 
@@ -52,6 +54,7 @@ class Bet:
     avg: Optional[float]
     model: Optional[float] = None
     elo: Optional[float] = None
+    key: tuple = ()           # ('1x2', 'home') | ('totals', 'over', '2.5') — для поиска конторы
 
     @property
     def ev(self) -> Optional[float]:
@@ -74,6 +77,36 @@ class MatchView:
     picks: List[tuple] = field(default_factory=list)      # (Bet, уверенность)
     warnings: List[str] = field(default_factory=list)
     likely: Optional[Bet] = None
+    moves: List[str] = field(default_factory=list)
+
+
+def line_moves(db: sqlite3.Connection, d: dict, fixture_id, now: datetime) -> List[dict]:
+    """Сдвиги честной линии с самого раннего снимка (старше MOVE_MIN_AGE_MIN)."""
+    if fixture_id is None:
+        return []
+    row = db.execute(
+        "SELECT taken_at, f_home, f_draw, f_away, f_over25 FROM snapshots "
+        "WHERE fixture_id=? AND f_home IS NOT NULL ORDER BY taken_at LIMIT 1",
+        (fixture_id,)).fetchone()
+    if not row:
+        return []
+    then = datetime.fromisoformat(row[0])
+    if (now - then).total_seconds() < MOVE_MIN_AGE_MIN * 60:
+        return []
+    fair, overs = market_probs(d.get("fair_odds") or {})
+    if not fair:
+        return []
+    out = []
+    names = {"home": f"П1 ({d['home']})", "draw": "ничья", "away": f"П2 ({d['away']})"}
+    for i, k in enumerate(("home", "draw", "away")):
+        old = row[1 + i]
+        if old is not None and abs(fair[k] - old) >= MOVE_PP:
+            out.append({"key": ("1x2", k), "label": names[k], "old": old, "new": fair[k],
+                        "since": then})
+    if row[4] is not None and 2.5 in overs and abs(overs[2.5] - row[4]) >= MOVE_PP:
+        out.append({"key": ("totals", "over", "2.5"), "label": "ТБ 2.5", "old": row[4],
+                    "new": overs[2.5], "since": then})
+    return out
 
 
 def _bets(d: dict) -> List[Bet]:
@@ -85,11 +118,11 @@ def _bets(d: dict) -> List[Bet]:
     model, elo = d.get("model_1x2") or {}, d.get("elo_1x2") or {}
     h, a = d["home"], d["away"]
     out = [Bet(f"П1 ({h})", fair["home"], best.get("home"), avg.get("home"),
-               model.get("home"), elo.get("home")),
+               model.get("home"), elo.get("home"), ("1x2", "home")),
            Bet("Ничья", fair["draw"], best.get("draw"), avg.get("draw"),
-               model.get("draw"), elo.get("draw")),
+               model.get("draw"), elo.get("draw"), ("1x2", "draw")),
            Bet(f"П2 ({a})", fair["away"], best.get("away"), avg.get("away"),
-               model.get("away"), elo.get("away"))]
+               model.get("away"), elo.get("away"), ("1x2", "away"))]
     for lbl, ks in (("1X", ("home", "draw")), ("X2", ("draw", "away")), ("12", ("home", "away"))):
         out.append(Bet(lbl, sum(fair[k] for k in ks), ex._dutch(*(best.get(k) for k in ks)),
                        ex._dutch(*(avg.get(k) for k in ks)),
@@ -102,9 +135,11 @@ def _bets(d: dict) -> List[Bet]:
         key = f"{ln:g}"
         b, a2 = tb.get(key) or {}, ta.get(key) or {}
         m_over = mo if ln == 2.5 else None
-        out.append(Bet(f"ТБ {key}", p, b.get("over"), a2.get("over"), m_over))
+        out.append(Bet(f"ТБ {key}", p, b.get("over"), a2.get("over"), m_over, None,
+                       ("totals", "over", key)))
         out.append(Bet(f"ТМ {key}", 1 - p, b.get("under"), a2.get("under"),
-                       None if m_over is None else 1 - m_over))
+                       None if m_over is None else 1 - m_over, None,
+                       ("totals", "under", key)))
     return out
 
 
@@ -183,9 +218,13 @@ def render_view(v: MatchView, tips: Sequence = ()) -> str:
                  + (f" | Elo: {_pct(e.get('home'))} · {_pct(e.get('draw'))} · "
                     f"{_pct(e.get('away'))}" if e else ""))
     if v.picks:
+        from .data.oddsapi import best_book
         for b, conf in v.picks:
             avg = f" (средний {b.avg:.2f})" if b.avg else ""
-            lines.append(f"✅ <b>{_esc(b.label)} @ {b.best:.2f}</b>{avg} — шанс ≈{_pct(b.prob)}, "
+            bb = best_book(d.get("book_odds") or {}, b.key[0], b.key[1],
+                           b.key[2] if len(b.key) > 2 else None) if b.key else None
+            where = f" в {_esc(bb[0])}" if bb else ""
+            lines.append(f"✅ <b>{_esc(b.label)} @ {b.best:.2f}</b>{where}{avg} — шанс ≈{_pct(b.prob)}, "
                          f"честный кэф {b.fair_odds:.2f}, EV {b.ev * 100:+.1f}%, "
                          f"уверенность: {conf}")
     elif v.bets:
@@ -195,6 +234,8 @@ def render_view(v: MatchView, tips: Sequence = ()) -> str:
         b = v.likely
         note = "" if (b.ev or -1) >= 0 else " — цена ниже честной, только для экспресса"
         lines.append(f"Самый вероятный исход: {_esc(b.label)} ≈{_pct(b.prob)} @ {b.best:.2f}{note}")
+    for m in v.moves:
+        lines.append(f"📉 {_esc(m)}")
     for w in v.warnings:
         lines.append(f"⚠️ {_esc(w)}")
     for c in tips:
@@ -251,6 +292,20 @@ def run(service, db: sqlite3.Connection, send: Callable[[int, str], None],
             print(f"{f.home} — {f.away}: {e}")
             continue
         v = analyze_view(d)
+        for mv in line_moves(db, d, f.id, now):
+            delta = (mv["new"] - mv["old"]) * 100
+            since = mv["since"].astimezone(MSK).strftime("%H:%M")
+            txt = (f"линия сдвинулась с {since}: {mv['label']} {mv['old'] * 100:.0f}% → "
+                   f"{mv['new'] * 100:.0f}% ({delta:+.0f} п.п.) — рынок что-то узнал "
+                   "(составы/травмы/деньги)")
+            for b, _ in v.picks:
+                same = b.key[:2] == mv["key"][:2]
+                opposite = (b.key[:1] == ("totals",) and mv["key"][0] == "totals"
+                            and b.key[1] != mv["key"][1])
+                if same or opposite:
+                    good = (delta > 0) == same
+                    txt += f"; для ставки «{b.label}» это {'плюс' if good else 'минус'}"
+            v.moves.append(txt)
         if not with_odds:
             v.warnings.insert(0, f"кредитов The Odds API меньше {reserve} — линию не тянул")
         tips = tips_for(d) if tips_for else []
@@ -259,6 +314,11 @@ def run(service, db: sqlite3.Connection, send: Callable[[int, str], None],
             journal._save_snapshot(db, d, f, now)  # почти закрывающая линия
         except Exception as e:
             print(f"journal: {e}")
+        for b, conf in v.picks:
+            if b.best and b.key and b.key[0] in ("1x2", "totals"):
+                db.execute("INSERT INTO alert_picks VALUES (?,?,?,?,?,?,?,?,?)",
+                           (f.id, now.isoformat(), b.label, b.key[0], b.key[1],
+                            b.key[2] if len(b.key) > 2 else None, b.best, b.prob, conf))
         db.execute("INSERT OR REPLACE INTO alerts VALUES (?, ?)", (f.id, now.isoformat()))
     db.commit()
     if not blocks:

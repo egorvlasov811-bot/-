@@ -2,8 +2,8 @@
 
 Линии:
   * футбол — наш сервис (ЛЧ + 8 лиг): честная линия, лучшие кэфы, модель, Elo;
-  * хоккей (NHL, SHL, Liiga, AHL) и теннис (крупные турниры ATP/WTA) — h2h из
-    The Odds API, только для турниров, где есть прогнозы (1 кредит за турнир);
+  * хоккей (NHL, SHL, Liiga, AHL) — h2h из The Odds API, только для лиг,
+    где есть прогнозы (1 кредит за лигу);
   * остальное (КХЛ, челленджеры, низшие лиги) — линии нет, вероятность по
     кэфам каперов минус маржа, уверенность ниже.
 """
@@ -99,24 +99,13 @@ def _football_lines(service, cands: List[tp.Candidate]) -> Dict[int, dict]:
     return out
 
 
-# ------------------------------------------------------------------ хоккей/теннис
-def _odds_key(c: tp.Candidate, active: List[dict]) -> Optional[str]:
-    lg = c.league or ""
-    if c.sport == "hockey":
-        for k, v in HOCKEY_KEYS.items():
-            if k.lower() in lg.lower():
-                return v
+# ------------------------------------------------------------------ хоккей
+def _odds_key(c: tp.Candidate) -> Optional[str]:
+    if c.sport != "hockey":
         return None
-    if c.sport == "tennis":
-        tour = "atp" if "atp" in lg.lower() else ("wta" if "wta" in lg.lower() else None)
-        if not tour or "challenger" in lg.lower() or "itf" in lg.lower():
-            return None
-        words = {w.lower() for w in lg.replace("·", " ").split() if len(w) > 3}
-        for s in active:
-            key = s.get("key", "")
-            if key.startswith(f"tennis_{tour}_") and \
-                    any(w in s.get("title", "").lower() for w in words):
-                return key
+    for k, v in HOCKEY_KEYS.items():
+        if k.lower() in (c.league or "").lower():
+            return v
     return None
 
 
@@ -125,16 +114,12 @@ def _h2h_lines(cands: List[tp.Candidate]) -> Dict[int, dict]:
         return {}
     from .data.oddsapi import OddsApiProvider
     op = OddsApiProvider()
-    need = [c for c in cands if c.sport in ("hockey", "tennis") and c.market == "winner"]
+    need = [c for c in cands if c.sport == "hockey" and c.market == "winner"]
     if not need:
         return {}
-    try:
-        active = op.sports() if any(c.sport == "tennis" for c in need) else []
-    except Exception:
-        active = []
     keys: Dict[str, List[tp.Candidate]] = {}
     for c in need:
-        k = _odds_key(c, active)
+        k = _odds_key(c)
         if k:
             keys.setdefault(k, []).append(c)
     out = {}
@@ -157,7 +142,7 @@ def _h2h_lines(cands: List[tp.Candidate]) -> Dict[int, dict]:
 
 
 def _two_way(e) -> Optional[dict]:
-    """Честные вероятности и лучшие цены h2h: 2 исхода (теннис, NHL) или 3."""
+    """Честные вероятности и лучшие цены h2h: 2 исхода (NHL с ОТ) или 3."""
     from .value import remove_margin
     for m in ("ml", "1x2"):
         fair = (e.fair or {}).get(m)
@@ -208,7 +193,7 @@ def collect(service=None, cfg: Optional[dict] = None, *, sources=None,
 
 
 # ------------------------------------------------------------------ текст
-SPORT_RU = {"football": "⚽ Футбол", "hockey": "🏒 Хоккей", "tennis": "🎾 Теннис"}
+SPORT_RU = {"football": "⚽ Футбол", "hockey": "🏒 Хоккей"}
 
 
 def _esc(s) -> str:

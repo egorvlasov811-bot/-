@@ -52,3 +52,31 @@ def test_report_empty(tmp_path):
     rep = journal.report(journal.connect(str(tmp_path / "e.db")))
     assert rep["matches"] == 0 and rep["clv_n"] == 0
     assert "CLV пока" in journal.render_report(rep)
+
+
+def test_book_prices_and_report(tmp_path):
+    db = journal.connect(str(tmp_path / "b.db"))
+    svc = FakeService()
+    orig = svc.analyze_fixture
+
+    def with_books(f):
+        d = orig(f)
+        d["book_odds"] = {"sharp": {"1x2": {"home": 2.0, "draw": 4.0, "away": 4.0}},
+                          "soft": {"1x2": {"home": 1.85, "draw": 3.6, "away": 3.7}}}
+        return d
+    svc.analyze_fixture = with_books
+    for i in range(40):
+        journal.record(svc, db, ["CL"], window_hours=36, now=NOW)
+    rows = journal.book_report(db, min_n=30)
+    assert [r["book"] for r in rows] == ["sharp", "soft"]
+    assert abs(rows[0]["vs_snapshot"]) < 1e-9 and rows[1]["vs_snapshot"] < -0.05
+    assert "ГДЕ СТАВИТЬ" in journal.render_books(rows)
+
+
+def test_best_book():
+    from footy.data.oddsapi import best_book
+    pb = {"a": {"1x2": {"home": 2.0}}, "b": {"1x2": {"home": 2.1},
+          "totals": {"2.5": {"over": 1.9}}}}
+    assert best_book(pb, "1x2", "home") == ("b", 2.1)
+    assert best_book(pb, "totals", "over", "2.5") == ("b", 1.9)
+    assert best_book(pb, "1x2", "away") is None

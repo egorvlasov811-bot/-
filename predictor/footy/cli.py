@@ -291,6 +291,12 @@ def cmd_journal(args: argparse.Namespace) -> int:
     _load_dotenv()
     from . import journal
     db = journal.connect(args.db or journal.DEFAULT_DB)
+    if args.action == "calibrate":
+        print(journal.render_calibration(journal.calibration(db)))
+        return 0
+    if args.action == "books":
+        print(journal.render_books(journal.book_report(db)))
+        return 0
     if args.action == "run":
         from .service import FootyService
         svc = FootyService()
@@ -828,7 +834,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("journal", parents=[common],
                         help="журнал прогнозов: run — снимок+результаты, report — метрики")
-    sp.add_argument("action", choices=["run", "report"])
+    sp.add_argument("action", choices=["run", "report", "books", "calibrate"])
     sp.add_argument("--comps", default=None,
                     help="турниры через запятую (деф. CL,PL,PD,BL1,SA,FL1)")
     sp.add_argument("--window", type=float, default=36.0,

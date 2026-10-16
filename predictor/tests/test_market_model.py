@@ -87,3 +87,19 @@ def test_merge_fair_fills_missing_lines_from_avg():
     avg = {"1x2": {"home": 1.9, "draw": 3.4, "away": 3.9}, "totals": {"2.5": {"over": 1.65, "under": 2.2}}}
     f = _merge_fair(sharp, avg)
     assert f["1x2"]["home"] == 2 and set(f["totals"]) == {"2.5", "2.75"}
+
+
+def test_finalize_uses_line_or_model_elo_pool():
+    from footy.service import _finalize_1x2
+    base = lambda: {"1x2": {"home": 0.5, "draw": 0.3, "away": 0.2},
+                    "totals": {"2.5": {"over": 0.6, "under": 0.4}}, "basis": "model"}
+    d = base()
+    _finalize_1x2(d, {"home": 0.4, "draw": 0.3, "away": 0.3}, {2.5: 0.55}, None)
+    assert d["1x2"]["home"] == 0.4 and d["totals"]["2.5"]["over"] == 0.55
+    assert d["double_chance"]["X2"] == 0.6
+    d = base()
+    _finalize_1x2(d, None, {}, {"home": 0.3, "draw": 0.3, "away": 0.4})
+    assert d["basis"] == "model+elo" and 0.3 < d["1x2"]["home"] < 0.5
+    d = base()
+    _finalize_1x2(d, None, {}, None)
+    assert d["1x2"]["home"] == 0.5

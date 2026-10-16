@@ -44,6 +44,14 @@ CREATE TABLE IF NOT EXISTS edges (
   snapshot_id INTEGER, fixture_id INTEGER, market TEXT, selection TEXT,
   odds REAL, fair_prob REAL, ev REAL
 );
+CREATE TABLE IF NOT EXISTS book_prices (
+  snapshot_id INTEGER, fixture_id INTEGER, book TEXT, market TEXT, sel TEXT,
+  price REAL
+);
+CREATE TABLE IF NOT EXISTS alert_picks (
+  fixture_id INTEGER, sent_at TEXT, label TEXT, market TEXT, sel TEXT, line TEXT,
+  price REAL, prob REAL, confidence TEXT
+);
 CREATE TABLE IF NOT EXISTS results (
   fixture_id INTEGER PRIMARY KEY, competition TEXT, hg INTEGER, ag INTEGER,
   c_home REAL, c_draw REAL, c_away REAL, c_over25 REAL, c_src TEXT
@@ -122,6 +130,13 @@ def _save_snapshot(db, d: dict, f, now: datetime) -> None:
          d["totals"]["2.5"]["over"], d["lambda"]["home"], d["lambda"]["away"],
          *(f1 or (None, None, None)), fo[0] if fo else None,
          d.get("sources", {}).get("books", 0)))
+    for book, o in (d.get("book_odds") or {}).items():
+        for sel, price in ((o.get("1x2") or {}).items()):
+            db.execute("INSERT INTO book_prices VALUES (?,?,?,?,?,?)",
+                       (cur.lastrowid, f.id, book, "1x2", sel, price))
+        for sel, price in (((o.get("totals") or {}).get("2.5") or {}).items()):
+            db.execute("INSERT INTO book_prices VALUES (?,?,?,?,?,?)",
+                       (cur.lastrowid, f.id, book, "tot25", sel, price))
     e = d.get("elo_1x2")
     if e:
         db.execute("UPDATE snapshots SET e_home=?, e_draw=?, e_away=? WHERE id=?",
@@ -305,4 +320,169 @@ def render_report(rep: dict) -> str:
                      "перевеса; ROI на малой выборке — шум.")
     else:
         lines.append("CLV пока не посчитан: нужны сыгранные матчи с закрытием.")
+    return "\n".join(lines)
+
+
+# ------------------------------------------------------------------ конторы
+def book_report(db: sqlite3.Connection, min_n: int = 30) -> List[dict]:
+    """Средняя цена каждой конторы относительно честной линии.
+
+    vs_snapshot — против честной линии в момент снимка (есть сразу);
+    vs_close — против закрывающей честной линии (после матчей). Чем выше,
+    тем выгоднее ставить в этой конторе; > 0 — цена в среднем лучше честной.
+    """
+    rows = db.execute(
+        "SELECT b.book, b.market, b.sel, b.price, s.f_home, s.f_draw, s.f_away, "
+        "s.f_over25, r.c_home, r.c_draw, r.c_away, r.c_over25 FROM book_prices b "
+        "JOIN snapshots s ON s.id = b.snapshot_id "
+        "LEFT JOIN results r ON r.fixture_id = b.fixture_id").fetchall()
+    agg: Dict[str, dict] = {}
+    for r in rows:
+        if r["market"] == "1x2":
+            f = r[f"f_{r['sel']}"]
+            c = r[f"c_{r['sel']}"]
+        else:
+            f = r["f_over25"] if r["sel"] == "over" else (
+                None if r["f_over25"] is None else 1 - r["f_over25"])
+            c = r["c_over25"] if r["sel"] == "over" else (
+                None if r["c_over25"] is None else 1 - r["c_over25"])
+        a = agg.setdefault(r["book"], {"book": r["book"], "n": 0, "snap": 0.0,
+                                       "above": 0, "nc": 0, "close": 0.0})
+        if f:
+            ev = r["price"] * f - 1
+            a["n"] += 1
+            a["snap"] += ev
+            a["above"] += ev > 0
+        if c:
+            a["nc"] += 1
+            a["close"] += r["price"] * c - 1
+    out = []
+    for a in agg.values():
+        if a["n"] < min_n:
+            continue
+        out.append({"book": a["book"], "n": a["n"],
+                    "vs_snapshot": a["snap"] / a["n"], "above_share": a["above"] / a["n"],
+                    "n_close": a["nc"],
+                    "vs_close": a["close"] / a["nc"] if a["nc"] >= min_n else None})
+    out.sort(key=lambda x: (x["vs_close"] if x["vs_close"] is not None else -9,
+                            x["vs_snapshot"]), reverse=True)
+    return out
+
+
+def render_books(rows: List[dict], top: int = 12) -> str:
+    if not rows:
+        return "Цен по конторам пока мало — нужны снимки (/today, уведомления за час)."
+    lines = ["ГДЕ СТАВИТЬ: средняя цена конторы относительно честной линии",
+             f"{'контора':<16}{'исходов':>8}{'к линии':>9}{'выше':>7}{'к закрытию':>12}"]
+    for r in rows[:top]:
+        vc = "—" if r["vs_close"] is None else f"{r['vs_close'] * 100:+.1f}%"
+        lines.append(f"{r['book'][:15]:<16}{r['n']:>8}{r['vs_snapshot'] * 100:>+8.1f}%"
+                     f"{r['above_share'] * 100:>6.0f}%{vc:>12}")
+    lines += ["", "«к линии» — средняя переплата/недоплата против честной цены (Pinnacle "
+                  "без маржи) в момент снимка; «выше» — как часто цена была выше честной; "
+                  "«к закрытию» — против закрывающей линии (главный показатель, копится "
+                  "после матчей). Ставь там, где эти числа ближе к нулю или выше."]
+    return "\n".join(lines)
+
+
+# ------------------------------------------------------------------ подстройка
+MIN_CALIB = 200     # матчей до любых выводов о весах/калибровке
+MIN_PICKS = 30      # ставок на уровень уверенности до выводов о ROI/CLV
+
+
+def _outcome(hg: int, ag: int) -> str:
+    return "home" if hg > ag else ("draw" if hg == ag else "away")
+
+
+def calibration(db: sqlite3.Connection) -> dict:
+    """Проверка на наших же матчах: точность, калибровка, вес модели, ставки."""
+    rows = db.execute(
+        "SELECT s.*, r.hg, r.ag, r.c_home, r.c_draw, r.c_away FROM snapshots s "
+        "JOIN results r USING (fixture_id) WHERE r.hg IS NOT NULL AND s.f_home IS NOT NULL "
+        "AND s.id = (SELECT MAX(id) FROM snapshots s2 WHERE s2.fixture_id = s.fixture_id)"
+    ).fetchall()
+    out: dict = {"matches": len(rows)}
+    # калибровка линии: предсказанная вероятность фаворита vs факт
+    bins: Dict[int, list] = {}
+    for r in rows:
+        o = _outcome(r["hg"], r["ag"])
+        for k in ("home", "away"):
+            p = r[f"f_{k}"]
+            b = bins.setdefault(min(int(p * 10), 9), [0, 0.0, 0])
+            b[0] += 1
+            b[1] += p
+            b[2] += (o == k)
+    out["reliability"] = [(i / 10, n, ps / n, w / n) for i, (n, ps, w) in sorted(bins.items())
+                          if n >= 20]
+    # оптимальный вес модели к линии (геометрический пул), только при достатке данных
+    if len(rows) >= MIN_CALIB:
+        best = None
+        for w in (0.0, 0.05, 0.1, 0.15, 0.2, 0.3):
+            ll = 0.0
+            for r in rows:
+                q = {k: (r[f"f_{k}"] ** (1 - w)) * (max(r[f"m_{k}"], 1e-6) ** w)
+                     for k in ("home", "draw", "away")}
+                z = sum(q.values())
+                ll -= math.log(q[_outcome(r["hg"], r["ag"])] / z)
+            ll /= len(rows)
+            if best is None or ll < best[1]:
+                best = (w, ll)
+        out["best_model_weight"] = best
+    # ставки из уведомлений: по уровню уверенности
+    picks = db.execute(
+        "SELECT p.*, r.hg, r.ag, r.c_home, r.c_draw, r.c_away, r.c_over25 FROM alert_picks p "
+        "JOIN results r USING (fixture_id) WHERE r.hg IS NOT NULL").fetchall()
+    lv: Dict[str, dict] = {}
+    for p in picks:
+        hg, ag = p["hg"], p["ag"]
+        if p["market"] == "1x2":
+            won = _outcome(hg, ag) == p["sel"]
+            cp = p[f"c_{p['sel']}"]
+        elif p["market"] == "totals":
+            line = float(p["line"])
+            won = (hg + ag > line) if p["sel"] == "over" else (hg + ag < line)
+            cp = p["c_over25"] if line == 2.5 else None
+            if cp is not None and p["sel"] == "under":
+                cp = 1 - cp
+        else:
+            continue
+        a = lv.setdefault(p["confidence"], {"n": 0, "pnl": 0.0, "clv": [], "won": 0})
+        a["n"] += 1
+        a["won"] += won
+        a["pnl"] += (p["price"] - 1) if won else -1
+        if cp:
+            a["clv"].append(p["price"] * cp - 1)
+    out["picks"] = {k: {"n": a["n"], "hit": a["won"] / a["n"], "roi": a["pnl"] / a["n"],
+                        "clv": (sum(a["clv"]) / len(a["clv"])) if a["clv"] else None,
+                        "clv_n": len(a["clv"])} for k, a in lv.items()}
+    return out
+
+
+def render_calibration(c: dict) -> str:
+    lines = ["ПРОВЕРКА НА НАШИХ МАТЧАХ", f"Сыгранных матчей со снимком линии: {c['matches']}"]
+    if c["matches"] < MIN_CALIB:
+        lines.append(f"Для выводов о весах и калибровке нужно ≥{MIN_CALIB} — пока копим.")
+    if c.get("best_model_weight"):
+        w, ll = c["best_model_weight"]
+        lines.append(f"Лучший вес модели к линии: {w:.2f} (log-loss {ll:.4f}). "
+                     + ("Модель не добавляет точности — итог = линия." if w == 0 else
+                        "Модель помогает — можно поднять её вес в итоге."))
+    if c["reliability"]:
+        lines.append("Калибровка линии (прогноз → факт):")
+        for lo, n, p, a in c["reliability"]:
+            lines.append(f"  {lo:.1f}–{lo + 0.1:.1f}: {n:>4} исходов, прогноз {p * 100:.0f}% → "
+                         f"факт {a * 100:.0f}%")
+    lines.append("Ставки из уведомлений:")
+    if not c["picks"]:
+        lines.append("  пока нет рассчитанных")
+    for conf in ("высокая", "средняя", "низкая"):
+        a = c["picks"].get(conf)
+        if not a:
+            continue
+        clv = "—" if a["clv"] is None else f"{a['clv'] * 100:+.1f}% ({a['clv_n']})"
+        note = "" if a["n"] >= MIN_PICKS else f" — мало данных (<{MIN_PICKS})"
+        lines.append(f"  {conf}: {a['n']} ставок, заход {a['hit'] * 100:.0f}%, ROI "
+                     f"{a['roi'] * 100:+.1f}%, CLV {clv}{note}")
+    lines.append("CLV > 0 на сотне+ ставок — признак реального перевеса; ROI на малой "
+                 "выборке — в основном удача.")
     return "\n".join(lines)

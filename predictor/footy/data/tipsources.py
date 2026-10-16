@@ -78,7 +78,7 @@ class Tipster:
 class TipPick:
     source: str
     tipster: str
-    sport: str                    # football | hockey | tennis
+    sport: str                    # football | hockey
     league: str
     start: str                    # ISO UTC (пусто, если источник не даёт)
     home: str
@@ -92,7 +92,7 @@ class TipPick:
     event_id: str = ""
 
 
-SPORTS = ("football", "hockey", "tennis")
+SPORTS = ("football", "hockey")
 
 
 # ------------------------------------------------------------------ BetBuddyRank
@@ -146,7 +146,7 @@ class BetBuddyRank:
 
 
 # ------------------------------------------------------------------ nb-bet
-_NB_SPORT = {"Футбол": "football", "Хоккей": "hockey", "Теннис": "tennis"}
+_NB_SPORT = {"Футбол": "football", "Хоккей": "hockey"}
 _NB_PICK = {"П1": ("winner", "h"), "П2": ("winner", "a"), "X": ("winner", "d"),
             "Х": ("winner", "d"), "1X": ("dc", "h"), "1Х": ("dc", "h"),
             "X2": ("dc", "a"), "Х2": ("dc", "a"), "12": ("dc", "n")}

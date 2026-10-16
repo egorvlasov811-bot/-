@@ -163,17 +163,52 @@ def save(db: sqlite3.Connection, day: str, picks: List[Pick],
     db.commit()
 
 
+def _alert_rows(db: sqlite3.Connection, day: str) -> list:
+    """Ставки из уведомлений за час, отправленные в день day (по МСК)."""
+    try:
+        rows = db.execute(
+            "SELECT p.*, r.hg, r.ag, s.home, s.away FROM alert_picks p "
+            "LEFT JOIN results r USING (fixture_id) "
+            "LEFT JOIN snapshots s ON s.fixture_id = p.fixture_id "
+            "AND s.id = (SELECT MAX(id) FROM snapshots s2 WHERE s2.fixture_id = p.fixture_id)"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    out = []
+    for r in rows:
+        try:
+            d = datetime.fromisoformat(r["sent_at"]).astimezone(MSK).date().isoformat()
+        except ValueError:
+            continue
+        if d == day:
+            out.append(r)
+    return out
+
+
 def results_text(db: sqlite3.Connection, day: str) -> Optional[str]:
-    """Итоги подборки за day; None, если подборки не было."""
+    """Итоги подборки и уведомлений за day; None, если ставок не было."""
     db.executescript(SCHEMA)
     rows = db.execute(
         "SELECT d.*, r.hg, r.ag FROM digest_items d LEFT JOIN results r "
         "USING (fixture_id) WHERE d.day=? ORDER BY d.kind DESC, d.group_id", (day,)
     ).fetchall()
-    if not rows:
+    alerts_ = _alert_rows(db, day)
+    if not rows and not alerts_:
         return None
-    lines = ["<b>Итоги вчерашней подборки</b>"]
+    lines = ["<b>Итоги вчерашних ставок</b>"]
     pnl, n = 0.0, 0
+    for r in alerts_:
+        ok = None if r["hg"] is None else settle(
+            ("ТБ " if r["sel"] == "over" else "ТМ ") + str(r["line"]) if r["market"] == "totals"
+            else {"home": "П1", "draw": "X", "away": "П2"}[r["sel"]], r["hg"], r["ag"])
+        mark = "⏳" if ok is None else ("✅" if ok else "❌")
+        score = "" if r["hg"] is None else f" ({r['hg']}:{r['ag']})"
+        match = f"{r['home']} — {r['away']}" if r["home"] else ""
+        lines.append(f"{mark} 🔔 {_esc(match)}{score}: {_esc(r['label'])} @ {r['price']:.2f} "
+                     f"[{_esc(r['confidence'])}]")
+        if ok is not None:
+            pnl += (r["price"] - 1) if ok else -1
+            n += 1
     for r in rows:
         if r["kind"] != "pick":
             continue

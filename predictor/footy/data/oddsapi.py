@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .http import HttpClient, client_from_env
 
@@ -41,7 +41,7 @@ SPORT_KEYS = {
 def sport_key(competition: str) -> str:
     """Код турнира -> ключ The Odds API (ключ soccer_* пропускается как есть)."""
     c = (competition or "").strip()
-    if c.startswith(("soccer_", "icehockey_", "tennis_")):
+    if c.startswith(("soccer_", "icehockey_")):
         return c
     if c.upper() in SPORT_KEYS:
         return SPORT_KEYS[c.upper()]
@@ -59,6 +59,7 @@ class EventOdds:
     books: int = 0                             # сколько контор дали цену
     fair: dict = field(default_factory=dict)   # «честная» линия: Pinnacle или среднее
     avg: dict = field(default_factory=dict)    # средние кэфы (цена «обычной» конторы)
+    per_book: dict = field(default_factory=dict)  # {контора: кэфы в формате движка}
 
 
 def _collect(event: dict, mode: str) -> dict:
@@ -92,7 +93,7 @@ def _collect(event: dict, mode: str) -> dict:
             out.setdefault("1x2", {})[key[1]] = val
         else:
             out.setdefault("totals", {}).setdefault(key[1], {})[key[2]] = val
-    # двухисходный рынок (теннис, NHL с овертаймом) — отдельно как «ml»
+    # двухисходный рынок (NHL с овертаймом) — отдельно как «ml»
     if "1x2" in out and set(out["1x2"]) == {"home", "away"}:
         out["ml"] = out.pop("1x2")
     # полупустые рынки (только одна сторона) бесполезны для value — убираем
@@ -192,12 +193,27 @@ class OddsApiProvider:
                         if mode in ("best", "avg") or bm.get("key") == mode)
             avg = _collect(ev, "avg")
             fair = _merge_fair(_collect(ev, "pinnacle"), avg)
+            per_book = {bm["key"]: _collect(ev, bm["key"])
+                        for bm in ev.get("bookmakers", []) if bm.get("key")}
             out.append(EventOdds(home=ev.get("home_team", ""),
                                  away=ev.get("away_team", ""),
                                  commence=ev.get("commence_time", ""),
-                                 odds=odds, books=books, fair=fair, avg=avg))
+                                 odds=odds, books=books, fair=fair, avg=avg,
+                                 per_book=per_book))
         out.sort(key=lambda e: e.commence)
         return out
+
+
+def best_book(per_book: dict, market: str, sel: str, line: Optional[str] = None
+              ) -> Optional[Tuple[str, float]]:
+    """(контора, кэф) с лучшей ценой на исход; market '1x2' | 'totals'."""
+    best = None
+    for book, o in (per_book or {}).items():
+        x = (o.get(market) or {})
+        price = (x.get(line) or {}).get(sel) if line else x.get(sel)
+        if price and (best is None or price > best[1]):
+            best = (book, float(price))
+    return best
 
 
 def odds_map(events: List[EventOdds]) -> Dict[tuple, dict]:
