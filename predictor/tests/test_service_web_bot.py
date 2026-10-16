@@ -134,4 +134,4 @@ def test_bot_private(tmp_path):
     bot = Bot(_service(tmp_path), lambda m, p: sent.append((m, p)) or {"ok": True},
               allowed={1})
     bot.handle({"message": {"chat": {"id": 2}, "from": {"id": 2}, "text": "/start"}})
-    assert sent[-1][1]["text"] == "Бот приватный."
+    assert sent[-1][1]["text"].startswith("Бот приватный.") and "2" in sent[-1][1]["text"]

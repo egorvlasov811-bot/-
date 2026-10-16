@@ -134,7 +134,8 @@ class Bot:
         if not self.allowed or user in self.allowed:
             return True
         if chat:
-            self.send(chat, "Бот приватный.")
+            self.send(chat, f"Бот приватный. Твой Telegram ID: <code>{user}</code> — "
+                            "отправь его владельцу бота, чтобы получить доступ.")
         return False
 
     def _safe(self, chat: int, fn, *args) -> None:
