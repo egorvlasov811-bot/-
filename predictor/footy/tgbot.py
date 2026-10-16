@@ -26,12 +26,13 @@ ApiCall = Callable[[str, dict], dict]
 HELP = ("⚽ <b>footy</b> — статистический разбор матчей.\n\n"
         "Выбери турнир кнопкой или напиши матч: <code>Arsenal - Chelsea</code>\n"
         "С турниром: <code>Real Madrid - Barcelona PD</code>\n\n"
-        "/today — лучшие ставки и экспрессы на сегодня "
-        "(сам присылаю каждое утро в 9:00 МСК).\n"
+        "/today — лучшие ставки и экспрессы на сегодня. Утром в 9:00 МСК "
+        "присылаю итоги вчерашних ставок.\n"
         "/express — экспрессы с максимальным шансом захода.\n"
         "/tips — прогнозы проверенных каперов (футбол, хоккей, теннис), "
         "сверенные с линией.\n"
-        "/stats — журнал: точность прогнозов и CLV на реальных матчах.\n\n"
+        "/stats — журнал: точность прогнозов и CLV на реальных матчах.\n"
+        "/credits — сколько осталось кредитов The Odds API.\n\n"
         "Модель даёт вероятности, а не гарантии. На истории букмекерская "
         "линия точнее модели — расхождения с ней это сигнал, а не верняк.")
 
@@ -82,6 +83,12 @@ class Bot:
         if buttons:
             payload["reply_markup"] = {"inline_keyboard": buttons}
         self.api("sendMessage", payload)
+
+    def _credits_line(self) -> str:
+        op = getattr(self.service, "odds_provider", None)
+        left = op.remaining() if op is not None and hasattr(op, "remaining") else None
+        return f"\n\n<i>Кредитов The Odds API осталось: {left} из 500 в месяц.</i>" \
+            if left is not None else ""
 
     def leagues_keyboard(self):
         rows, row = [], []
@@ -167,9 +174,21 @@ class Bot:
             from . import digest
             from .service import EXPRESS_COMPS
             self.send(chat, "Собираю подборку на сегодня… (до минуты)")
-            picks, expresses, n = digest.build_today(self.service, EXPRESS_COMPS)
-            self.send(chat, digest.today_text(picks, expresses, n) if n else
-                      "Сегодня в ЛЧ и топ-5 лигах матчей с линией нет.")
+            analyses: list = []
+            picks, expresses, n = digest.build_today(self.service, EXPRESS_COMPS,
+                                                     analyses_out=analyses)
+            self.send(chat, (digest.today_text(picks, expresses, n) if n else
+                             "Сегодня в ЛЧ и топ-5 лигах матчей с линией нет.")
+                      + self._credits_line())
+            if n:
+                try:  # журнал и итоги завтра — из уже скачанных кэфов
+                    from . import journal
+                    digest.save_on_demand(journal.connect(), analyses, picks, expresses)
+                except Exception as e:
+                    print(f"save: {e}")
+            return
+        if text.startswith("/credits"):
+            self.send(chat, self._credits_line().strip() or "Ключ The Odds API не задан.")
             return
         if text.startswith("/express"):
             self.send(chat, "Экспресс с максимальным шансом захода — откуда брать матчи?",

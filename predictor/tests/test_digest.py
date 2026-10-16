@@ -67,7 +67,7 @@ def test_full_run_saves_and_reports_next_day(tmp_path):
 
     sent = []
     text = digest.run(Svc(), db, lambda c, t: sent.append((c, t)), [7], competitions=["PL"],
-                      collect_tips=lambda svc: ([], {}))
+                      collect_tips=lambda svc: ([], {}), with_odds=True)
     assert sent and all(c == 7 for c, _ in sent)
     assert "Ставки на сегодня" in text and "Экспресс" in text
     day = datetime.now(digest.MSK).date().isoformat()
@@ -81,3 +81,21 @@ def test_full_run_saves_and_reports_next_day(tmp_path):
 def test_results_text_none_without_digest(tmp_path):
     db = journal.connect(str(tmp_path / "e.db"))
     assert digest.results_text(db, "2026-01-01") is None
+
+
+
+def test_morning_run_without_odds_does_not_analyze(tmp_path):
+    db = journal.connect(str(tmp_path / "m.db"))
+
+    class Svc:
+        class provider:
+            @staticmethod
+            def competition_matches(**kw):
+                return []
+
+        def upcoming(self, comp, days=2):
+            raise AssertionError("утром без запроса матчи не тянем")
+
+    sent = []
+    text = digest.run(Svc(), db, lambda c, t: sent.append(t), [1])
+    assert "/today" in text and sent

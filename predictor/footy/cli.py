@@ -337,7 +337,7 @@ def cmd_digest(args: argparse.Namespace) -> int:
         send = lambda chat, text: api("sendMessage", {
             "chat_id": chat, "text": text, "parse_mode": "HTML",
             "disable_web_page_preview": True})
-    text = digest.run(FootyService(), db, send, ids)
+    text = digest.run(FootyService(), db, send, ids, with_odds=args.with_odds)
     if args.dry_run:
         import re
         print(re.sub(r"</?[bi]>", "", text).replace("&lt;", "<")
@@ -802,6 +802,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="утренняя рассылка: итоги вчера + ставки и экспрессы дня")
     sp.add_argument("--dry-run", action="store_true",
                     help="только показать текст, не отправлять")
+    sp.add_argument("--with-odds", action="store_true",
+                    help="с подборкой дня (тратит кредиты The Odds API)")
     sp.add_argument("--db", default=None, help="путь к SQLite (деф. footy.db)")
     sp.set_defaults(func=cmd_digest)
 

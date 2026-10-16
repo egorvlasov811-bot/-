@@ -1,9 +1,0 @@
-[Unit]
-Description=footy journal: CL match days, ~1.5h before evening kickoffs
-
-[Timer]
-OnCalendar=Tue,Wed *-*-* 15:30:00 UTC
-Persistent=true
-
-[Install]
-WantedBy=timers.target

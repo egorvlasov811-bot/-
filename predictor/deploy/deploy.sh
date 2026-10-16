@@ -35,7 +35,15 @@ ssh "$HOST" 'set -e
     rm -f /etc/systemd/system/footy-journal.timer /etc/systemd/system/footy-journal.service
     systemctl daemon-reload
   fi
-  systemctl enable -q --now footy-digest.timer footy-journal-cl.timer
+  # снимок перед ЛЧ по таймеру убран: кредиты The Odds API — только по запросу
+  for u in footy-journal-cl; do
+    if [ -f /etc/systemd/system/$u.timer ]; then
+      systemctl disable -q --now $u.timer || true
+      rm -f /etc/systemd/system/$u.timer /etc/systemd/system/$u.service
+    fi
+  done
+  systemctl daemon-reload
+  systemctl enable -q --now footy-digest.timer
   sleep 2
   systemctl --no-pager --lines=0 status footy-bot footy-web | grep -E "●|Active"'
 echo "Готово. Веб: ssh -L 8050:127.0.0.1:8050 $HOST  ->  http://127.0.0.1:8050"

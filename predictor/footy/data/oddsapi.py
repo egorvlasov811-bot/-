@@ -144,9 +144,19 @@ class OddsApiProvider:
         self.regions = regions
         if http is None:
             http = client_from_env()
-            # кэфы двигаются — кэшируем коротко (деф. 10 минут)
-            http.ttl = float(os.environ.get("FOOTY_ODDS_CACHE_TTL", 600))
+            # кэфы двигаются, но кредиты дороже — кэш 30 минут
+            http.ttl = float(os.environ.get("FOOTY_ODDS_CACHE_TTL", 1800))
         self.http = http
+
+    def remaining(self) -> Optional[int]:
+        """Остаток кредитов за месяц (запрос /sports бесплатный)."""
+        try:
+            import requests
+            r = requests.get(f"{BASE_URL}/sports", params={"apiKey": self.api_key},
+                             timeout=15)
+            return int(r.headers.get("x-requests-remaining"))
+        except Exception:
+            return None
 
     def sports(self) -> list:
         """Активные виды спорта/турниры (бесплатный запрос, кредиты не тратит)."""

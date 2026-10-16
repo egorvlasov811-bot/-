@@ -286,8 +286,12 @@ def tips_text(tips: Sequence) -> str:
     return "\n".join(lines)
 
 
-def build_today(service, competitions: Sequence[str], hours: float = 21.0):
-    """(лучшие события, экспрессы, число матчей) на ближайшие hours часов."""
+def build_today(service, competitions: Sequence[str], hours: float = 21.0,
+                analyses_out: Optional[list] = None):
+    """(лучшие события, экспрессы, число матчей) на ближайшие hours часов.
+
+    analyses_out — сюда складываются разборы (для журнала, без новых запросов).
+    """
     now = datetime.now(timezone.utc)
     analyses = []
     for comp in competitions:
@@ -308,6 +312,8 @@ def build_today(service, competitions: Sequence[str], hours: float = 21.0):
                 continue
             if d.get("basis") == "market":
                 analyses.append(d)
+    if analyses_out is not None:
+        analyses_out.extend(analyses)
     picks = best_picks(analyses)
     expresses = []
     for i, t in enumerate(TARGETS):
@@ -319,35 +325,60 @@ def build_today(service, competitions: Sequence[str], hours: float = 21.0):
     return picks, expresses, len(analyses)
 
 
+def save_on_demand(db: sqlite3.Connection, analyses: Sequence[dict], picks, expresses,
+                   tips=(), now: Optional[datetime] = None) -> None:
+    """Запрос /today: журнал + подборка дня — из уже скачанных кэфов, бесплатно."""
+    from .service import Fixture
+    now = now or datetime.now(timezone.utc)
+    for d in analyses:
+        f = Fixture(d.get("fixture_id"), d.get("competition", ""), d["home"], d["away"],
+                    None, None, d.get("kickoff", ""), "TIMED")
+        try:
+            journal._save_snapshot(db, d, f, now)
+        except Exception as e:
+            print(f"journal: {e}")
+    db.commit()
+    save(db, now.astimezone(MSK).date().isoformat(), picks, expresses, tips)
+
+
 def run(service, db: sqlite3.Connection, send, recipients: Sequence[int],
         competitions: Sequence[str] = journal.DEFAULT_COMPS,
-        now: Optional[datetime] = None, collect_tips=None) -> str:
-    """Полный утренний цикл; send(chat_id, text) отправляет сообщение."""
+        now: Optional[datetime] = None, collect_tips=None,
+        with_odds: bool = False) -> str:
+    """Утренний цикл; send(chat_id, text) отправляет сообщение.
+
+    По умолчанию БЕЗ запросов к The Odds API (лимит 500/мес): только итоги
+    вчерашней подборки (football-data + BetBuddyRank — бесплатно) и подсказка
+    взять ставки дня по /today. with_odds=True — прежний режим с подборкой.
+    """
     now = now or datetime.now(timezone.utc)
-    journal.record(service, db, competitions, window_hours=36)
+    if with_odds:
+        journal.record(service, db, competitions, window_hours=36)
     journal.update_results(service, db)
     today = now.astimezone(MSK).date()
     parts = []
     prev = results_text(db, (today - timedelta(days=1)).isoformat())
     if prev:
         parts.append(prev)
-    picks, expresses, n = build_today(service, competitions)
-    tips = []
-    try:
-        from . import tips_service as ts
-        from . import tipsters as tp
-        cands, stats = (collect_tips or ts.collect)(service)
-        cfg = tp.load_config()
-        tips = [c for c in tp.best_candidates(cands, cfg)
-                if c.start and _within_day(c.start, now)]
-    except Exception as e:
-        print(f"tips: {e}")
-    if n:
-        parts.append(today_text(picks, expresses, n))
+    if with_odds:
+        picks, expresses, n = build_today(service, competitions)
+        tips = []
+        try:
+            from . import tips_service as ts
+            from . import tipsters as tp
+            cands, stats = (collect_tips or ts.collect)(service)
+            tips = [c for c in tp.best_candidates(cands, tp.load_config())
+                    if c.start and _within_day(c.start, now)]
+        except Exception as e:
+            print(f"tips: {e}")
+        parts.append(today_text(picks, expresses, n) if n else
+                     "Сегодня в ЛЧ и топ-5 лигах матчей с линией нет.")
+        parts.append(tips_text(tips))
+        save(db, today.isoformat(), picks if n else [], expresses if n else [], tips)
     else:
-        parts.append("Сегодня в ЛЧ и топ-5 лигах матчей с линией нет.")
-    parts.append(tips_text(tips))
-    save(db, today.isoformat(), picks if n else [], expresses if n else [], tips)
+        parts.append("Ставки на сегодня — по запросу: /today (лучшие события и "
+                     "экспрессы), /tips (каперы), /express. Линию букмекеров тяну "
+                     "только по запросу, чтобы беречь лимит The Odds API.")
     parts[0] = "☀️ Доброе утро!\n\n" + parts[0]
     for chat in recipients:
         for part in parts:  # отдельными сообщениями: лимит Telegram 4096 символов
