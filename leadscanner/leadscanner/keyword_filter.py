@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from .textnorm import compile_phrase, phrase_in_tokens, tokenize, word_count
 
 POSITIVE_GROUPS = ("hot_ru", "warm_ru", "hot_en", "warm_en")
+STEM_GROUPS = ("stems_ru", "stems_en")
+DEFAULT_STEMS_CONTEXT = ["бот", "мини-апп", "телеграм", "посев", "закуп"]
 
 
 @dataclass
@@ -22,12 +24,17 @@ class FilterResult:
 
 
 class KeywordFilter:
+    """Сообщение проходит, если в нём есть фраза из hot/warm-групп, или корень из
+    stems_* вместе со словом-контекстом (stems_context), нет минус-слов и слов
+    не меньше min_words."""
+
     def __init__(self, dictionaries: dict, min_words: int = 6):
         self.min_words = min_words
         self._groups: dict[str, list[tuple[str, list[str]]]] = {}
-        for group in (*POSITIVE_GROUPS, "minus"):
-            phrases = dictionaries.get(group) or []
-            self._groups[group] = [(p, compile_phrase(str(p))) for p in phrases if str(p).strip()]
+        context = dictionaries.get("stems_context") or DEFAULT_STEMS_CONTEXT
+        for group, phrases in [*((g, dictionaries.get(g)) for g in (*POSITIVE_GROUPS, *STEM_GROUPS, "minus")),
+                               ("stems_context", context)]:
+            self._groups[group] = [(str(p), compile_phrase(str(p))) for p in phrases or [] if str(p).strip()]
 
     def _find(self, group: str, tokens: list[str]) -> list[str]:
         return [phrase for phrase, stems in self._groups[group] if phrase_in_tokens(stems, tokens)]
@@ -41,6 +48,10 @@ class KeywordFilter:
             return FilterResult(False, f"minus:{minus[0]}")
         hot = self._find("hot_ru", tokens) + self._find("hot_en", tokens)
         warm = self._find("warm_ru", tokens) + self._find("warm_en", tokens)
+        if not hot and not warm:
+            stems = [s for g in STEM_GROUPS for s in self._find(g, tokens)]
+            if stems and self._find("stems_context", tokens):
+                warm = [f"корень:{s}" for s in stems]
         if not hot and not warm:
             return FilterResult(False, "no_keywords")
         return FilterResult(True, "ok", hot=hot, warm=warm)

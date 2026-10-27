@@ -54,3 +54,40 @@ def test_similarity_and_text_helpers():
     assert strip_links("Привет https://x.com и t.me/abc и @someone") == "Привет и и"
     cut = truncate("Слово " * 200, 450)
     assert len(cut) <= 450
+
+
+# --- рабочий словарь из config/keywords.yaml ---------------------------------------
+
+def real_filter():
+    from conftest import TestConfig
+
+    return KeywordFilter(TestConfig().keywords)
+
+
+def test_real_phrases_match_other_word_forms():
+    f = real_filter()
+    assert f.check("Ребята, нужна аналитика для ботов, кто чем пользуется сейчас?").passed
+    assert f.check("Посев у нас опять не окупается, уже третий канал подряд").passed
+    assert f.check("Хочу выгрузить пользователей бота в таблицу, есть способ?").passed
+    assert f.check("Can't track conversion from telegram ads to my mini app at all").passed
+
+
+def test_real_stems_need_context():
+    f = real_filter()
+    with_context = f.check("Не понимаю как считать окупаемость, закуп идёт уже месяц")
+    assert with_context.passed and with_context.warm == ["корень:окупа"]
+    assert f.check("Квартира окупается за двенадцать лет при текущей ставке").reason == "no_keywords"
+
+
+def test_real_minus_words():
+    f = real_filter()
+    assert f.check("Вакансии: ищем специалиста по аналитике бота, удалёнка").reason.startswith("minus")
+    assert f.check("Продаём курс через бота, нужна аналитика бота и воронка").reason == "minus:курс"
+
+
+def test_dictionary_words_are_stemmed():
+    from leadscanner.textnorm import stem_word
+
+    assert [stem_word(w) for w in ["бота", "посевы", "посевов", "посев", "окупаются", "пользователей", "users"]] == [
+        "бот", "посев", "посев", "посев", "окупа", "пользовател", "user",
+    ]
