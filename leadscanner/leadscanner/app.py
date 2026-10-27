@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from .config import Config, Secrets
 from .db import Database
@@ -73,8 +74,17 @@ async def login() -> None:
         raise SystemExit("Задайте TG_API_ID и TG_API_HASH (my.telegram.org)")
     async with TelegramClient(StringSession(), secrets.tg_api_id, secrets.tg_api_hash) as client:
         me = await client.get_me()
+        session = client.session.save()
+        out = os.environ.get("SESSION_OUT")
+        if out:
+            # deploy.sh забирает строку из файла сам, чтобы она не светилась в терминале.
+            fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(session)
+            print(f"\nВошли как @{me.username}. Сессия сохранена.")
+            return
         print(f"\nВошли как @{me.username}. Сохраните строку ниже в TG_SESSION (это секрет!):\n")
-        print(client.session.save())
+        print(session)
 
 
 async def list_chats() -> None:
