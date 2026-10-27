@@ -82,7 +82,8 @@ def test_real_stems_need_context():
 def test_real_minus_words():
     f = real_filter()
     assert f.check("Вакансии: ищем специалиста по аналитике бота, удалёнка").reason.startswith("minus")
-    assert f.check("Продаём курс через бота, нужна аналитика бота и воронка").reason == "minus:курс"
+    assert f.check("Продаём курс через бота, нужна аналитика бота и воронка").passed, "онлайн-школы — целевой сегмент"
+    assert f.check("Продам базу подписчиков, аналитика бота прилагается к ней").reason == "minus:продам базу"
 
 
 def test_dictionary_words_are_stemmed():
