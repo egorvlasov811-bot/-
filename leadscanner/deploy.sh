@@ -6,9 +6,41 @@
 # Повторный запуск безопасен: заполненное в .env не спрашивается заново.
 set -euo pipefail
 cd "$(dirname "$0")"
+[[ $EUID -eq 0 ]] || { echo "Запустите от root: sudo bash deploy.sh" >&2; exit 1; }
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 fail() { printf '\n\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
+
+# --- защита сервера ------------------------------------------------------------------
+harden() {
+  if [[ $EUID -ne 0 ]] || ! command -v apt-get >/dev/null 2>&1; then
+    echo "Пропускаю настройку защиты сервера (нужны root и Ubuntu/Debian)."
+    return
+  fi
+  if [[ -f /etc/fail2ban/jail.d/leadscanner-sshd.local ]]; then
+    return  # уже настроено при прошлом запуске
+  fi
+  say "Защита сервера: автообновления безопасности, файрвол, защита SSH от перебора паролей"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq ufw fail2ban python3-systemd unattended-upgrades >/dev/null
+  printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
+    > /etc/apt/apt.conf.d/20auto-upgrades
+  printf '[sshd]\nenabled = true\nbackend = systemd\nmaxretry = 5\nfindtime = 10m\nbantime = 1h\n' \
+    > /etc/fail2ban/jail.d/leadscanner-sshd.local
+  systemctl enable fail2ban >/dev/null 2>&1 || true
+  systemctl restart fail2ban >/dev/null 2>&1 || true
+  # Порты, на которых сейчас слушает sshd, — чтобы файрвол не отрезал вам доступ.
+  local ports
+  ports=$(ss -tlnpH 2>/dev/null | awk '/sshd/ {for (i = 1; i <= NF; i++) if ($i ~ /:[0-9]+$/) {n = split($i, a, ":"); print a[n]; break}}' | sort -u | tr '\n' ' ')
+  [[ -n "${ports// /}" ]] || ports=22
+  for p in $ports; do ufw allow "${p}/tcp" >/dev/null; done
+  ufw default deny incoming >/dev/null
+  ufw default allow outgoing >/dev/null
+  ufw --force enable >/dev/null
+  echo "Файрвол включён: снаружи открыт только SSH (порт ${ports% }). Сканеру входящие соединения не нужны."
+}
+harden
 
 # --- Docker ----------------------------------------------------------------------
 if ! command -v docker >/dev/null 2>&1; then
@@ -29,6 +61,9 @@ fi
 [[ -f .env ]] || cp .env.example .env
 chmod 600 .env
 mkdir -p data
+chmod 700 data
+# Сервис в контейнере работает не от root, а от пользователя 10001 — ему нужна запись в data/.
+chown 10001:10001 data 2>/dev/null || true
 
 get_env() { grep -E "^$1=" .env | tail -1 | cut -d= -f2- || true; }
 set_env() {
@@ -144,5 +179,14 @@ say "Шаг 5/5. Запуск"
 "${DC[@]}" up -d
 sleep 5
 "${DC[@]}" logs --tail 20 leadscanner
+if [[ $EUID -eq 0 ]] && [[ ! -f data/.root_password_changed ]]; then
+  say "Пароль root этого сервера пересылался в переписке. Сменить его сейчас? [Y/n]"
+  read -r answer
+  if [[ ! "$answer" =~ ^[NnНн] ]]; then
+    echo "Придумайте длинный пароль (12+ символов) и сохраните его в менеджере паролей."
+    passwd root && touch data/.root_password_changed
+  fi
+fi
+
 say "Готово. В @${BOT_NAME} должно прийти «🟢 Лид-сканер запущен». Команды бота: /help"
 echo "Логи: ${DC[*]} logs -f   ·   Стоп: ${DC[*]} down   ·   Обновить: git pull && ${DC[*]} up -d --build"

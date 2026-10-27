@@ -7,5 +7,15 @@ services:
       DB_PATH: /app/data/leads.db
     volumes:
       - ./data:/app/data
-      # Конфиг монтируется с хоста: правки словарей и источников без пересборки
-      - ./config:/app/config
+      # Конфиг монтируется с хоста только для чтения: правки словарей и источников без пересборки
+      - ./config:/app/config:ro
+    # Портов наружу нет: сервис сам ходит в Telegram и API, входящие соединения ему не нужны.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
