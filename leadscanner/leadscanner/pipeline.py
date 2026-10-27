@@ -18,7 +18,9 @@ from .models import Candidate
 
 log = logging.getLogger(__name__)
 
-MAX_ATTEMPTS = 5
+# Бесплатные тарифы LLM упираются в дневной лимит — ждём до ~суток, не выбрасывая кандидатов.
+MAX_ATTEMPTS = 60
+MAX_BACKOFF_SEC = 1800
 
 
 class Notifier(Protocol):
@@ -70,8 +72,9 @@ class Pipeline:
                         await self.db.finish_candidate(cid, "error", str(exc))
                         continue
                     await self.db.retry_candidate(cid, str(exc))
-                    log.warning("LLM temporarily unavailable: %s", exc)
-                    return 30
+                    backoff = min(30 * 2 ** attempts, MAX_BACKOFF_SEC)
+                    log.warning("LLM временно недоступен (%s), пауза %s с", exc, backoff)
+                    return backoff
                 except Exception as exc:  # noqa: BLE001
                     log.exception("candidate %s failed", cid)
                     await self.db.finish_candidate(cid, "error", repr(exc)[:500])

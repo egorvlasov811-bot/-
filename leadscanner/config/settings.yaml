@@ -13,9 +13,17 @@ offer:
     когорты и удержание, выгрузка базы пользователей. Подключение за 10 минут.
 
 llm:
-  model: claude-haiku-5-5      # уровень Haiku; для сложных случаев можно claude-sonnet-5-5
-  effort: low                  # low / medium / high — глубина рассуждений и стоимость
-  max_tokens: 2000
+  # Провайдер (LLM_PROVIDER в .env важнее этой строки; смена — с перезапуском):
+  #   gemini — бесплатно, ключ: aistudio.google.com → Get API key
+  #   groq   — бесплатно, ключ: console.groq.com → API Keys
+  #   anthropic — Claude API, платно (ANTHROPIC_API_KEY)
+  #   openai_compatible — любой OpenAI-совместимый сервис, нужен base_url
+  provider: gemini
+  model: ""                    # пусто = по умолчанию: gemini-flash-latest / openai/gpt-oss-120b / claude-haiku-5-5
+  base_url: ""                 # только для openai_compatible
+  min_interval_sec: 0          # пауза между запросами; 0 = по умолчанию провайдера (лимиты бесплатного уровня)
+  effort: low                  # только для anthropic
+  max_tokens: 4000
   min_score: 60                # в бот оператора уходят лиды от этого score
   max_draft_chars: 450
   prompt_file: prompt.md       # путь относительно папки config

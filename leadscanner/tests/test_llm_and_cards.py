@@ -73,3 +73,72 @@ async def test_catalog_lead_without_contact_gets_manual_button(db):
     buttons = [b.callback_data for row in card_keyboard(lead).inline_keyboard for b in row]
     assert f"manual:{lead['id']}" in buttons and f"contact:{lead['id']}" in buttons
     assert f"send:{lead['id']}" not in buttons
+
+
+# --- бесплатные провайдеры (OpenAI-совместимый API) --------------------------------
+
+import httpx  # noqa: E402
+import pytest  # noqa: E402
+
+from leadscanner.config import Secrets  # noqa: E402
+from leadscanner.llm import OpenAICompatScorer, TemporaryLLMError, make_scorer  # noqa: E402
+
+
+def compat(handler):
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return OpenAICompatScorer(TestConfig(), "key", "https://llm.test/v1", "test-model", 0, client=client)
+
+
+def completion(content):
+    return httpx.Response(200, json={"choices": [{"message": {"content": content}, "finish_reason": "stop"}]})
+
+
+async def test_compat_parses_json_even_in_code_fence():
+    seen = []
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        return completion("```json\n" + json.dumps(PAYLOAD, ensure_ascii=False) + "\n```")
+
+    a = await compat(handler).assess(chat_candidate())
+    assert a.is_lead and a.score == 82 and "http" not in a.draft_message
+    body = seen[0]
+    assert body["model"] == "test-model" and body["response_format"] == {"type": "json_object"}
+    assert "Формат ответа" in body["messages"][0]["content"]
+
+
+async def test_compat_retries_without_optional_params_on_400():
+    bodies = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        if "reasoning_effort" in body:
+            return httpx.Response(400, json={"error": "unknown parameter reasoning_effort"})
+        return completion(json.dumps(PAYLOAD))
+
+    scorer = compat(handler)
+    assert (await scorer.assess(chat_candidate())).is_lead
+    assert len(bodies) == 2 and "response_format" not in bodies[1]
+    await scorer.assess(chat_candidate())
+    assert len(bodies) == 3, "запоминает, что параметры не поддерживаются"
+
+
+@pytest.mark.parametrize("status", [429, 500, 401, 404])
+async def test_compat_errors_keep_candidate(status):
+    with pytest.raises(TemporaryLLMError):
+        await compat(lambda r: httpx.Response(status, text="err")).assess(chat_candidate())
+
+
+def test_make_scorer_picks_provider():
+    secrets = Secrets(None, None, None, None, None, frozenset(), None, ":memory:", None, None,
+                      llm_provider="groq", llm_api_key="k")
+    scorer = make_scorer(TestConfig(), secrets)
+    assert scorer.url == "https://api.groq.com/openai/v1/chat/completions"
+    assert scorer.model == "openai/gpt-oss-120b"
+    gemini = make_scorer(TestConfig(), Secrets(None, None, None, None, None, frozenset(), None, ":memory:",
+                                               None, None, llm_api_key="k"))
+    assert gemini.model == "gemini-flash-latest" and "generativelanguage" in gemini.url
+    claude = make_scorer(TestConfig(), Secrets(None, None, None, None, None, frozenset(), "a", ":memory:",
+                                               None, None, llm_provider="anthropic"))
+    assert isinstance(claude, LLMScorer)

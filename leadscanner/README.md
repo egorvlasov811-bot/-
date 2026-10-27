@@ -1,12 +1,12 @@
 # Лид-сканер для Telegram
 
 Сервис находит людей и проекты, которым нужна аналитика для Telegram-ботов и
-мини-аппов, оценивает их через Claude и присылает оператору карточку с
+мини-аппов, оценивает их нейросетью (бесплатно Gemini или Groq, платно Claude) и присылает оператору карточку с
 персональным черновиком. **Сообщение уходит только после нажатия «Отправить».**
 
 ```
 Telegram-чаты (Telethon) ─┐
-Telegram Ads Spy (API)    ├─► candidates ─► ключевые слова ─► дедупликация ─► Claude (JSON)
+Telegram Ads Spy (API)    ├─► candidates ─► ключевые слова ─► дедупликация ─► LLM (JSON)
 hh.ru (API), фриланс RSS  │    (в БД)        keywords.yaml      30 дней           score, сегмент,
 topapps / Apps Center ... ┘                                                     черновик
                                                                                    │
@@ -24,7 +24,7 @@ topapps / Apps Center ... ┘                                                   
 |---|---|
 | `leadscanner/telegram_account.py` | Рабочий аккаунт: слушает новые сообщения в чатах, где он уже состоит; ловит ответы лидов; отправляет |
 | `leadscanner/keyword_filter.py` | Ступень 1: корни из `keywords.yaml`, без учёта регистра и ё/е, минус-слова, минимум 6 слов |
-| `leadscanner/llm.py` | Ступень 2: Claude API со строгой JSON-схемой ответа; черновик ≤450 знаков, ссылки вычищаются |
+| `leadscanner/llm.py` | Ступень 2: Gemini / Groq (бесплатно) или Claude API, ответ строго в JSON; черновик ≤450 знаков, ссылки вычищаются |
 | `leadscanner/pipeline.py` | Конвейер. Кандидаты сначала пишутся в БД — перезапуск ничего не теряет |
 | `leadscanner/operator_bot.py`, `cards.py` | Бот оператора (aiogram 3): карточки, кнопки, команды |
 | `leadscanner/sender.py` | Отправка: дневной лимит, интервал + разброс, стоп на 24 ч, проверка похожести >80% |
@@ -50,7 +50,8 @@ cd leads/leadscanner && bash deploy.sh
 2. **Ключи.** `cp .env.example .env` и заполните:
    - `TG_API_ID`, `TG_API_HASH` — на my.telegram.org;
    - `BOT_TOKEN` — у @BotFather;
-   - `ANTHROPIC_API_KEY`;
+   - `LLM_PROVIDER` и `LLM_API_KEY` — бесплатный ключ Gemini (aistudio.google.com) или Groq
+     (console.groq.com); для Claude — `LLM_PROVIDER=anthropic` и `ANTHROPIC_API_KEY`;
    - `OPERATOR_CHAT_ID` — напишите боту `/start`, он покажет id чата.
 3. **Сессия аккаунта** (один раз, интерактивно — придёт код в Telegram):
    ```bash
@@ -107,7 +108,7 @@ cd leads/leadscanner && bash deploy.sh
 ```bash
 python scripts/eval_llm.py my_labeled_100.jsonl
 ```
-Скрипт тратит по одному запросу к Claude на строку и печатает точность, долю мусора,
+Скрипт тратит по одному запросу к нейросети на строку и печатает точность, долю мусора,
 язык черновика и ссылку на фразу автора. Ошибки модели правьте в `config/prompt.md`.
 
 ## Защита аккаунта и данные
@@ -135,6 +136,8 @@ python scripts/eval_llm.py my_labeled_100.jsonl
   их API или отдельный парсер. robots.txt соблюдается автоматически.
 - **Фриланс-RSS.** Адреса лент в `settings.yaml` — примеры; проверьте условия площадок.
 - **hh.ru** работает через официальный API.
-- Модель по умолчанию — `claude-haiku-5-5` (уровень Haiku по ТЗ). Если точность на выборке
-  ниже 80%, поставьте `llm.model: claude-sonnet-5-5` или поднимите `llm.effort`.
+- **Нейросеть.** По умолчанию — бесплатный Gemini (`gemini-flash-latest`), между запросами пауза 6,5 с
+  из-за лимита бесплатного тарифа. Когда дневной лимит кончается, кандидаты ждут в очереди и не теряются.
+  Учтите: на бесплатных тарифах провайдер может использовать присланные тексты для обучения своих моделей.
+  Если точность на выборке ниже 80%, попробуйте `groq` или платный `anthropic` (`claude-haiku-5-5`).
 - База — SQLite (по ТЗ на старте). SQL простой, на PostgreSQL переносится заменой `db.py`.

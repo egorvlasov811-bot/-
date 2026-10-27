@@ -3,8 +3,8 @@
 Формат выборки (JSONL, одна строка — одно сообщение, размеченное вручную):
   {"text": "...", "chat": "Название чата", "is_lead": true, "language": "ru"}
 
-Запуск (тратит реальные запросы к Claude API — по одному на строку):
-  ANTHROPIC_API_KEY=... python scripts/eval_llm.py tests/data/labeled_sample.jsonl
+Запуск (по одному запросу к LLM на строку; провайдер — как в settings.yaml / LLM_PROVIDER):
+  LLM_API_KEY=... python scripts/eval_llm.py tests/data/labeled_sample.jsonl
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from leadscanner.config import Config  # noqa: E402
-from leadscanner.llm import LLMScorer  # noqa: E402
+from leadscanner.config import Config, Secrets  # noqa: E402
+from leadscanner.llm import TemporaryLLMError, make_scorer  # noqa: E402
 from leadscanner.models import Candidate  # noqa: E402
 from leadscanner.textnorm import tokenize  # noqa: E402
 
@@ -40,14 +40,21 @@ def quotes_author(draft: str, text: str) -> bool:
 
 async def main(path: str, concurrency: int) -> None:
     rows = [json.loads(line) for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
-    scorer = LLMScorer(Config())
+    config = Config()
+    scorer = make_scorer(config, Secrets.from_env())
     sem = asyncio.Semaphore(concurrency)
 
     async def one(row):
         async with sem:
             c = Candidate(source=row.get("chat", "test"), source_type=row.get("source_type", "chat"),
                           text=row["text"], chat_title=row.get("chat", ""))
-            return row, await scorer.assess(c)
+            for attempt in range(5):
+                try:
+                    return row, await scorer.assess(c)
+                except TemporaryLLMError as exc:
+                    print(f"… лимит/сбой LLM ({exc}), повтор через {20 * (attempt + 1)} с")
+                    await asyncio.sleep(20 * (attempt + 1))
+            return row, None
 
     results = await asyncio.gather(*(one(r) for r in rows))
     tp = fp = tn = fn = 0

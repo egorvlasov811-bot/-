@@ -8,7 +8,7 @@ import os
 
 from .config import Config, Secrets
 from .db import Database
-from .llm import LLMScorer
+from .llm import make_scorer
 from .operator_bot import OperatorBot
 from .pipeline import Pipeline
 from .replies import ReplyHandler
@@ -27,7 +27,7 @@ async def run() -> None:
     await db.connect()
 
     bot = OperatorBot(secrets, config, db)
-    pipeline = Pipeline(db, config, LLMScorer(config), bot)
+    pipeline = Pipeline(db, config, make_scorer(config, secrets), bot)
 
     account = None
     if secrets.tg_session:

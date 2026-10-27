@@ -54,7 +54,41 @@ say "Шаг 1/5. Ключи (хранятся только в .env на этом
 ask TG_API_ID "TG_API_ID (my.telegram.org → API development tools)"
 ask TG_API_HASH "TG_API_HASH" secret
 ask BOT_TOKEN "Токен бота от @BotFather" secret
-ask ANTHROPIC_API_KEY "Ключ Claude API (console.anthropic.com)" secret
+
+if [[ -z "$(get_env LLM_PROVIDER)" ]]; then
+  echo
+  echo "Какая нейросеть оценивает лидов?"
+  echo "  1) Google Gemini — бесплатно (ключ: aistudio.google.com → Get API key)"
+  echo "  2) Groq — бесплатно (ключ: console.groq.com → API Keys)"
+  echo "  3) Claude — платно (ключ: console.anthropic.com)"
+  read -rp "Номер [1]: " choice
+  case "${choice:-1}" in
+    2) set_env LLM_PROVIDER groq ;;
+    3) set_env LLM_PROVIDER anthropic ;;
+    *) set_env LLM_PROVIDER gemini ;;
+  esac
+fi
+PROVIDER=$(get_env LLM_PROVIDER)
+case "$PROVIDER" in
+  anthropic)
+    ask ANTHROPIC_API_KEY "Ключ Claude API" secret ;;
+  *)
+    ask LLM_API_KEY "Ключ API ($PROVIDER)" secret
+    case "$PROVIDER" in
+      gemini) MODELS_URL="https://generativelanguage.googleapis.com/v1beta/openai/models" ;;
+      groq)   MODELS_URL="https://api.groq.com/openai/v1/models" ;;
+      *)      MODELS_URL="" ;;
+    esac
+    if [[ -n "$MODELS_URL" ]]; then
+      CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(get_env LLM_API_KEY)" "$MODELS_URL" || true)
+      if [[ "$CODE" == 200 ]]; then
+        echo "Ключ $PROVIDER работает."
+      else
+        echo "⚠️  $PROVIDER ответил HTTP $CODE на проверку ключа. Проверьте LLM_API_KEY в .env"
+        echo "    (403/400 с сервера в РФ — сервис недоступен из этой страны, нужен VPS за рубежом)."
+      fi
+    fi ;;
+esac
 
 TOKEN=$(get_env BOT_TOKEN)
 ME=$(curl -fsS "https://api.telegram.org/bot${TOKEN}/getMe" || true)

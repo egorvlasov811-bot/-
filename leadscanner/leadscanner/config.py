@@ -28,6 +28,8 @@ class Secrets:
     db_path: str
     sheets_credentials_json: str | None
     sheets_id: str | None
+    llm_provider: str | None = None
+    llm_api_key: str | None = None
 
     @classmethod
     def from_env(cls) -> "Secrets":
@@ -52,6 +54,8 @@ class Secrets:
             db_path=os.environ.get("DB_PATH", "data/leads.db"),
             sheets_credentials_json=os.environ.get("GOOGLE_SHEETS_CREDENTIALS_JSON") or None,
             sheets_id=os.environ.get("GOOGLE_SHEET_ID") or None,
+            llm_provider=(os.environ.get("LLM_PROVIDER") or "").strip().lower() or None,
+            llm_api_key=os.environ.get("LLM_API_KEY") or None,
         )
 
 
