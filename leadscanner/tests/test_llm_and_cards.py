@@ -142,3 +142,10 @@ def test_make_scorer_picks_provider():
     claude = make_scorer(TestConfig(), Secrets(None, None, None, None, None, frozenset(), "a", ":memory:",
                                                None, None, llm_provider="anthropic"))
     assert isinstance(claude, LLMScorer)
+
+
+def test_openrouter_preset():
+    s = Secrets(None, None, None, None, None, frozenset(), None, ":memory:", None, None,
+                llm_provider="openrouter", llm_api_key="k")
+    scorer = make_scorer(TestConfig(), s)
+    assert scorer.url == "https://openrouter.ai/api/v1/chat/completions" and scorer.model == "openrouter/free"

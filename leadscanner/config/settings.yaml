@@ -16,10 +16,11 @@ llm:
   # Провайдер (LLM_PROVIDER в .env важнее этой строки; смена — с перезапуском):
   #   gemini — бесплатно, ключ: aistudio.google.com → Get API key
   #   groq   — бесплатно, ключ: console.groq.com → API Keys
+  #   openrouter — бесплатные модели, ключ: openrouter.ai → Keys (50 запросов/день, 1000 после разового пополнения на $10)
   #   anthropic — Claude API, платно (ANTHROPIC_API_KEY)
   #   openai_compatible — любой OpenAI-совместимый сервис, нужен base_url
   provider: gemini
-  model: ""                    # пусто = по умолчанию: gemini-flash-latest / openai/gpt-oss-120b / claude-haiku-5-5
+  model: ""                    # пусто = по умолчанию: gemini-flash-latest / openai/gpt-oss-120b / openrouter/free / claude-haiku-5-5
   base_url: ""                 # только для openai_compatible
   min_interval_sec: 0          # пауза между запросами; 0 = по умолчанию провайдера (лимиты бесплатного уровня)
   effort: low                  # только для anthropic

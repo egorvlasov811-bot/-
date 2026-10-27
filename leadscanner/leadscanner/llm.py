@@ -3,6 +3,7 @@
 Провайдеры (llm.provider в settings.yaml или LLM_PROVIDER в окружении):
 - gemini — Google Gemini, бесплатный уровень (ключ в aistudio.google.com);
 - groq — Groq, бесплатный уровень (ключ в console.groq.com);
+- openrouter — бесплатные модели OpenRouter (ключ в openrouter.ai → Keys);
 - openai_compatible — любой сервис с OpenAI-совместимым API (llm.base_url);
 - anthropic — Claude API (платный).
 """
@@ -51,6 +52,8 @@ PROVIDERS = {
     # base_url, модель по умолчанию, пауза между запросами (бесплатные лимиты по RPM)
     "gemini": ("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-flash-latest", 6.5),
     "groq": ("https://api.groq.com/openai/v1", "openai/gpt-oss-120b", 2.5),
+    # openrouter/free сам выбирает доступную бесплатную модель; лимит 20 запросов в минуту.
+    "openrouter": ("https://openrouter.ai/api/v1", "openrouter/free", 3.5),
     "openai_compatible": ("", "", 0.0),
 }
 ANTHROPIC_DEFAULT_MODEL = "claude-haiku-5-5"

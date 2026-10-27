@@ -60,11 +60,13 @@ if [[ -z "$(get_env LLM_PROVIDER)" ]]; then
   echo "Какая нейросеть оценивает лидов?"
   echo "  1) Google Gemini — бесплатно (ключ: aistudio.google.com → Get API key)"
   echo "  2) Groq — бесплатно (ключ: console.groq.com → API Keys)"
-  echo "  3) Claude — платно (ключ: console.anthropic.com)"
+  echo "  3) OpenRouter — бесплатные модели (ключ: openrouter.ai → Keys)"
+  echo "  4) Claude — платно (ключ: console.anthropic.com)"
   read -rp "Номер [1]: " choice
   case "${choice:-1}" in
     2) set_env LLM_PROVIDER groq ;;
-    3) set_env LLM_PROVIDER anthropic ;;
+    3) set_env LLM_PROVIDER openrouter ;;
+    4) set_env LLM_PROVIDER anthropic ;;
     *) set_env LLM_PROVIDER gemini ;;
   esac
 fi
@@ -77,6 +79,7 @@ case "$PROVIDER" in
     case "$PROVIDER" in
       gemini) MODELS_URL="https://generativelanguage.googleapis.com/v1beta/openai/models" ;;
       groq)   MODELS_URL="https://api.groq.com/openai/v1/models" ;;
+      openrouter) MODELS_URL="https://openrouter.ai/api/v1/key" ;;
       *)      MODELS_URL="" ;;
     esac
     if [[ -n "$MODELS_URL" ]]; then
