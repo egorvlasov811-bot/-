@@ -1,0 +1,96 @@
+# Настройки лид-сканера. Файл перечитывается на лету (по времени изменения),
+# правки применяются без перезапуска и деплоя.
+# Секреты (ключи, токены, сессия) сюда НЕ пишем — только в переменные окружения.
+
+timezone: Europe/Moscow        # для «до утра», сводок и недельного отчёта
+day_starts_at_hour: 9          # с этого часа обнуляется дневной лимит отправок
+
+offer:
+  contact: "@creatorofreal"
+  description: >
+    Аналитика для Telegram-ботов и мини-аппов: окупаемость каждого рекламного
+    размещения по меткам (start-параметры/UTM), воронка от входа до оплаты,
+    когорты и удержание, выгрузка базы пользователей. Подключение за 10 минут.
+
+llm:
+  model: claude-haiku-5-5      # уровень Haiku; для сложных случаев можно claude-sonnet-5-5
+  effort: low                  # low / medium / high — глубина рассуждений и стоимость
+  max_tokens: 2000
+  min_score: 60                # в бот оператора уходят лиды от этого score
+  max_draft_chars: 450
+  prompt_file: prompt.md       # путь относительно папки config
+
+telegram:
+  # Пусто = слушаем все группы и обсуждения каналов, где уже состоит рабочий аккаунт.
+  # Можно перечислить @username или числовые id, чтобы ограничить список.
+  chats: []
+  exclude_chats: []
+  include_channel_posts: false # посты самих каналов (обычно это не лиды)
+  min_words: 6
+
+filter:
+  keywords_file: keywords.yaml
+  # Для каких типов источников применять ступень 1 (ключевые слова).
+  # Каталоги и вакансии уже отобраны запросом, их сразу оценивает LLM.
+  apply_to: [chat, freelance]
+
+limits:
+  daily_first_messages: 25     # 20–30 по ТЗ
+  daily_followups: 30
+  min_interval_sec: 150        # не меньше 2–3 минут между отправками
+  jitter_sec: 90               # случайный разброс сверху
+  stop_hours: 24               # пауза после FloodWait/PeerFlood
+  similarity_threshold: 0.8    # >80% совпадения с отправленным за сутки — не отправляем
+
+schedule:
+  warm_batch_minutes: 120      # warm-лиды приходят пачкой раз в 2 часа
+  warm_batch_max: 30
+  remind_hours: 24             # кнопка «Позже»
+  followup_days: [2, 5, 12]
+  weekly_report: {weekday: 0, hour: 10}   # понедельник, 10:00
+  dedup_days: 30
+  retention_days: 180
+  sheets_sync_minutes: 30
+
+# Каталоги и веб-источники. Включаются/выключаются здесь, без деплоя.
+web:
+  min_delay_sec: 2.5           # не чаще 1 запроса в 2–3 секунды на домен
+  jitter_sec: 0.7
+  timeout_sec: 30
+  user_agent: "LeadScanner/1.0 (+contact: @creatorofreal)"
+
+sources:
+  tgadsspy:
+    enabled: true
+    every_hours: 24
+    url: "https://tgadsspy.com/api/v1/bots"
+    attribution: "Данные: Telegram Ads Spy (tgadsspy.com), CC-BY-4.0"
+    max_items: 200
+
+  hh:
+    enabled: true
+    every_hours: 24
+    queries:
+      - "закупщик рекламы Telegram"
+      - "Telegram Ads"
+      - "медиабайер Telegram"
+    area: null                 # null = все регионы; 113 = Россия
+    period_days: 1
+
+  freelance_rss:
+    enabled: true
+    every_hours: 2
+    queries: ["telegram bot", "телеграм бот", "mini app", "мини-апп", "мини апп"]
+    feeds:
+      # Публичные ленты заказов. Перед включением проверьте условия сайта.
+      - {name: "habr-freelance", url: "https://freelance.habr.com/tasks.rss"}
+      - {name: "fl.ru", url: "https://www.fl.ru/rss/all.xml"}
+
+  catalog_pages:
+    enabled: true
+    every_hours: 24
+    initial_import: 20         # сколько карточек взять при первом запуске
+    pages:
+      - {name: "topapps.tg", url: "https://topapps.tg/", kind: rating}
+      - {name: "Telegram Apps Center", url: "https://tapps.center/new", kind: new}
+      - {name: "FindMini", url: "https://www.findmini.app/", kind: new}

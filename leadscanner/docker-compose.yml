@@ -1,0 +1,11 @@
+services:
+  leadscanner:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /app/data/leads.db
+    volumes:
+      - ./data:/app/data
+      # Конфиг монтируется с хоста: правки словарей и источников без пересборки
+      - ./config:/app/config

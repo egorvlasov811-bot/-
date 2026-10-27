@@ -1,0 +1,34 @@
+# Второе и последующие касания (день 2, 5, 12 после первого сообщения).
+# Подставляются: {name} — username или проект, {pain} — боль из карточки.
+# Бот присылает оператору черновик, отправка — только по кнопке.
+
+followups:
+  ru:
+    - "Добрый день! Возвращаюсь к вопросу про окупаемость рекламы — могу за 10 минут показать на вашем боте, какой канал сколько приносит. Удобно на неделе?"
+    - "Коротко: подключение занимает 10 минут и ничего не ломает в боте. Если тема «{pain}» ещё актуальна — пришлю пример отчёта?"
+    - "Не буду надоедать — это последнее сообщение. Если понадобится разобраться, какая реклама окупается, просто ответьте сюда."
+  en:
+    - "Hi! Following up on tracking which ads pay off — I can show it on your bot in 10 minutes. Would this week work?"
+    - "Quick one: setup takes 10 minutes and doesn't touch your bot logic. If \"{pain}\" is still relevant, want me to send a sample report?"
+    - "Last note from me, promise. If you ever need to see which placements actually pay off, just reply here."
+
+# Ответы, после которых лид получает lost + do_not_contact навсегда (поиск по корням).
+refusals:
+  - "не интерес"
+  - "неинтерес"
+  - "не пиши"
+  - "не надо писать"
+  - "не нужно"
+  - "не нужн"
+  - "отстан"
+  - "спам"
+  - "удалите мои данные"
+  - "удалить мои данные"
+  - "not interested"
+  - "no thanks"
+  - "don't write"
+  - "dont write"
+  - "do not contact"
+  - "stop"
+  - "unsubscribe"
+  - "delete my data"
